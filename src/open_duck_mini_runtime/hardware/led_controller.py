@@ -1,12 +1,13 @@
 """
-Shared controller for a single NeoPixel strip used by eyes (2 LEDs) and
-projector (1 LED).
+Shared controller for a single NeoPixel strip used by eyes and projector.
 
 LED index layout
 ----------------
-- Index 0: projector
-- Index 1: right eye
-- Index 2: left eye
+The strip is divided into three contiguous segments, in this order:
+projector, right eye, left eye. Each segment's pixel count is
+configurable (see ``led_counts`` in ``duck_config.json``) so eyes/
+flashlight built from LED rings or clusters are supported, not just a
+single pixel per feature.
 
 Hardware imports (``board`` / ``neopixel``) are deferred until the first
 :class:`LedController` instantiation so that the module can be safely
@@ -19,13 +20,16 @@ from __future__ import annotations
 import os
 import atexit
 from threading import Lock
-from typing import Tuple, Optional, Union
+from typing import Dict, Tuple, Optional, Union
 
 # ---------------------------------------------------------------------------
 # Configuration constants (resolved at import time using only stdlib / env)
 # ---------------------------------------------------------------------------
 
-NUM_PIXELS: int = 10
+# Segment pixel counts used when the caller doesn't supply its own
+# (i.e. no duck_config.json ``led_counts`` section) — matches the
+# original fixed 1/1/1 layout.
+DEFAULT_LED_COUNTS: Dict[str, int] = {"projector": 1, "right_eye": 1, "left_eye": 1}
 
 # Allow pixel order / brightness overrides via environment variables so they
 # can be set in a systemd unit or SSH session without touching the code.
@@ -47,7 +51,7 @@ class LedController:
     :exc:`ModuleNotFoundError` on non-Raspberry-Pi machines.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, led_counts: Optional[Dict[str, int]] = None) -> None:
         # --- Lazy hardware imports -------------------------------------------
         try:
             import board
@@ -58,6 +62,23 @@ class LedController:
                 "Ensure 'adafruit-circuitpython-neopixel' and 'rpi-ws281x' "
                 "are installed and that you are running on the robot hardware."
             ) from exc
+
+        counts = dict(DEFAULT_LED_COUNTS)
+        if led_counts:
+            counts.update(led_counts)
+        for key, value in counts.items():
+            if not isinstance(value, int) or value < 1:
+                raise ValueError(
+                    f"led_counts[{key!r}] must be a positive int, got {value!r}"
+                )
+
+        n_proj = counts["projector"]
+        n_right = counts["right_eye"]
+        n_left = counts["left_eye"]
+        self._proj_slice = slice(0, n_proj)
+        self._right_slice = slice(n_proj, n_proj + n_right)
+        self._left_slice = slice(n_proj + n_right, n_proj + n_right + n_left)
+        num_pixels = n_proj + n_right + n_left
 
         # Allow duck_config to override pixel order (env var takes priority).
         order_name = _ORDER_NAME
@@ -89,7 +110,7 @@ class LedController:
 
         self._pixels = _neopixel.NeoPixel(
             PIXEL_PIN,
-            NUM_PIXELS,
+            num_pixels,
             brightness=BRIGHTNESS,
             auto_write=True,
             pixel_order=self._order,
@@ -146,10 +167,15 @@ class LedController:
             if proj_color is None:
                 proj_color = self.proj_color if self.projector_on else self.OFF
 
-            self._pixels[0] = self._to_order(proj_color)
-            self._pixels[1] = self._to_order(right_color)
-            self._pixels[2] = self._to_order(left_color)
+            self._fill(self._proj_slice, proj_color)
+            self._fill(self._right_slice, right_color)
+            self._fill(self._left_slice, left_color)
             self._pixels.show()
+
+    def _fill(self, segment: slice, color_rgba: Tuple) -> None:
+        """Paint every pixel in ``segment`` the same colour."""
+        value = self._to_order(color_rgba)
+        self._pixels[segment] = [value] * (segment.stop - segment.start)
 
     def _to_order(self, color_rgba: Tuple) -> Tuple:
         """Strip the W channel for non-W strips; the neopixel library handles byte reordering."""
@@ -267,9 +293,14 @@ class LedController:
 _controller: Optional[LedController] = None
 
 
-def get_controller() -> LedController:
-    """Return (creating if necessary) the module-level :class:`LedController`."""
+def get_controller(led_counts: Optional[Dict[str, int]] = None) -> LedController:
+    """Return (creating if necessary) the module-level :class:`LedController`.
+
+    ``led_counts`` is only consulted the first time this creates the
+    singleton; later calls (potentially with different counts) just
+    return the already-initialised controller.
+    """
     global _controller
     if _controller is None:
-        _controller = LedController()
+        _controller = LedController(led_counts=led_counts)
     return _controller

@@ -24,6 +24,13 @@
         "camera": false
     },
 
+    "led_counts": {
+        "_comment": "Number of NeoPixel LEDs wired to each segment of the strip, in strip order (projector, then right eye, then left eye). Only used when neopixels=true. Defaults to 1/1/1 if omitted.",
+        "projector": 1,
+        "right_eye": 1,
+        "left_eye": 1
+    },
+
     "_generic_usb_controller_comment": "Optional: override axis/button indices for generic_usb or 8bitdo controller types. Run controller_info.py to identify indices.",
     "generic_usb_controller": {
         "joystick_index": 0,

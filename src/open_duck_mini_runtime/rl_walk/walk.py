@@ -129,7 +129,10 @@ class RLWalk:
 
         # Optional expression features
         if self.duck_config.eyes:
-            self.eyes = Eyes(neopixels=self.duck_config.neopixels)
+            self.eyes = Eyes(
+                neopixels=self.duck_config.neopixels,
+                led_counts=self.duck_config.led_counts,
+            )
             if self.paused:
                 self.eyes.set_standby(True)
                 self.eyes.set_solid(False)
@@ -139,7 +142,7 @@ class RLWalk:
                 self.eyes.set_solid(False)
                 self.eyes.set_color(self._ec(self.duck_config.eye_color_start))
         if self.duck_config.projector:
-            self.projector = Projector()
+            self.projector = Projector(led_counts=self.duck_config.led_counts)
         if self.duck_config.speaker:
             self.sounds = Sounds(volume=1.0, sound_directory=ASSETS_ROOT_PATH)
         if self.duck_config.antennas:

@@ -53,6 +53,10 @@ class Eyes:
     neopixels : bool
         ``True``  — use the NeoPixel LED controller (default, new hardware).
         ``False`` — use original single-colour GPIO eyes (old hardware).
+    led_counts : dict, optional
+        Per-segment pixel counts (``projector``/``right_eye``/``left_eye``)
+        forwarded to the shared :class:`LedController`. Only consulted the
+        first time the controller singleton is created. Ignored in GPIO mode.
     """
 
     def __init__(
@@ -61,11 +65,13 @@ class Eyes:
         min_interval: float = 1.0,
         max_interval: float = 4.0,
         neopixels: bool = True,
+        led_counts: dict | None = None,
     ):
         self.blink_duration = blink_duration
         self.min_interval = min_interval
         self.max_interval = max_interval
         self._neopixels = neopixels
+        self._led_counts = led_counts
 
         # _solid: when True the blink thread keeps eyes on (neopixel) or runs SOS (original)
         self._solid = False
@@ -89,7 +95,7 @@ class Eyes:
     def _init_neopixel(self) -> None:
         from open_duck_mini_runtime.hardware.led_controller import get_controller
 
-        self.ctrl = get_controller()
+        self.ctrl = get_controller(led_counts=self._led_counts)
         self.ctrl.set_eyes_color("white")
         self.ctrl.set_eyes(True)
 

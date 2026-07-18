@@ -4,8 +4,8 @@ from open_duck_mini_runtime.hardware.led_controller import get_controller
 
 
 class Projector:
-    def __init__(self):
-        self.ctrl = get_controller()
+    def __init__(self, led_counts: dict | None = None):
+        self.ctrl = get_controller(led_counts=led_counts)
         self.on = False
         self.ctrl.set_projector(False)
 

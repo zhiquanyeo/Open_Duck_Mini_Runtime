@@ -83,6 +83,13 @@ class DuckConfig:
 
         self.led_order = self.json_config.get("led_order", "GRBW")
 
+        led_counts = self.json_config.get("led_counts", {})
+        self.led_counts = {
+            "projector": led_counts.get("projector", 1),
+            "right_eye": led_counts.get("right_eye", 1),
+            "left_eye": led_counts.get("left_eye", 1),
+        }
+
         # default joints offsets are 0.0
         self.joints_offset = self.json_config.get(
             "joints_offsets",
