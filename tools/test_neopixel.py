@@ -1,10 +1,10 @@
 """
 Quick NeoPixel strip smoke-test.
 
-LED layout (projector, left eye, right eye — 1 pixel each by default):
-  index 0   → projector
+LED layout (right eye, left eye, projector — 1 pixel each by default):
+  index 0   → right eye
   index 1   → left eye
-  index 2   → right eye
+  index 2   → projector
 
 Run with:
   uv run tools/test_neopixel.py
@@ -35,11 +35,11 @@ def main() -> None:
     args = parser.parse_args()
 
     n_proj, n_left, n_right = args.count
-    num_pixels = n_proj + n_left + n_right
+    num_pixels = n_right + n_left + n_proj
 
-    proj_slice = slice(0, n_proj)
-    left_slice = slice(n_proj, n_proj + n_left)
-    right_slice = slice(n_proj + n_left, n_proj + n_left + n_right)
+    right_slice = slice(0, n_right)
+    left_slice = slice(n_right, n_right + n_left)
+    proj_slice = slice(n_right + n_left, n_right + n_left + n_proj)
 
     print(f"Initialising {num_pixels}-pixel strip on {PIXEL_PIN} ...")
     pixels = neopixel.NeoPixel(
@@ -51,9 +51,9 @@ def main() -> None:
     )
 
     segments = [
-        ("projector", proj_slice, (255, 255, 255)),   # white
-        ("left eye",  left_slice, (0, 0, 255)),       # blue
         ("right eye", right_slice, (0, 255, 0)),      # green
+        ("left eye",  left_slice, (0, 0, 255)),       # blue
+        ("projector", proj_slice, (255, 255, 255)),   # white
     ]
 
     print("Cycling through segments — Ctrl-C to exit")
