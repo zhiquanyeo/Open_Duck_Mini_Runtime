@@ -18,7 +18,7 @@ import board
 import neopixel
 
 PIXEL_PIN = board.D10
-PIXEL_ORDER = neopixel.GRBW
+PIXEL_ORDER = neopixel.GRB
 BRIGHTNESS = 1.0
 
 
@@ -51,16 +51,16 @@ def main() -> None:
     )
 
     segments = [
-        ("projector", proj_slice, (0, 0, 0, 255)),   # white (W channel)
-        ("left eye",  left_slice, (0, 0, 255, 0)),    # blue
-        ("right eye", right_slice, (0, 255, 0, 0)),   # green
+        ("projector", proj_slice, (255, 255, 255)),   # white
+        ("left eye",  left_slice, (0, 0, 255)),       # blue
+        ("right eye", right_slice, (0, 255, 0)),      # green
     ]
 
     print("Cycling through segments — Ctrl-C to exit")
     try:
         while True:
             for name, seg, color in segments:
-                pixels.fill((0, 0, 0, 0))
+                pixels.fill((0, 0, 0))
                 pixels[seg] = [color] * (seg.stop - seg.start)
                 pixels.show()
                 print(f"  {name}")
@@ -68,7 +68,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        pixels.fill((0, 0, 0, 0))
+        pixels.fill((0, 0, 0))
         pixels.show()
         pixels.deinit()
         print("\nDone.")

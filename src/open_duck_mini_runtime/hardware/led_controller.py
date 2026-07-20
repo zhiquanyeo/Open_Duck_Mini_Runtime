@@ -33,9 +33,8 @@ DEFAULT_LED_COUNTS: Dict[str, int] = {"projector": 1, "right_eye": 1, "left_eye"
 
 # Allow pixel order / brightness overrides via environment variables so they
 # can be set in a systemd unit or SSH session without touching the code.
-_ORDER_NAME: str = os.getenv("ODUCK_LED_ORDER", "GRBW").upper()
+_ORDER_NAME: str = os.getenv("ODUCK_LED_ORDER", "GRB").upper()
 BRIGHTNESS: float = float(os.getenv("ODUCK_LED_BRIGHTNESS", "1.0"))
-WHITE_MODE: str = os.getenv("ODUCK_LED_WHITE_MODE", "W").upper()
 
 
 # ---------------------------------------------------------------------------
@@ -90,18 +89,8 @@ class LedController:
         except Exception:
             pass
 
-        white_mode = WHITE_MODE
-        try:
-            from open_duck_mini_runtime.duck_config import LED_WHITE_MODE as _cfg_wm  # type: ignore
-
-            if _cfg_wm:
-                white_mode = _cfg_wm.upper()
-        except Exception:
-            pass
-
         self._neopixel = _neopixel
-        self._order = getattr(_neopixel, order_name, _neopixel.RGBW)
-        self._white_mode = white_mode
+        self._order = getattr(_neopixel, order_name, _neopixel.GRB)
 
         PIXEL_PIN = board.D10
 
@@ -116,13 +105,13 @@ class LedController:
             pixel_order=self._order,
         )
 
-        # Cache simple colour tuples in logical (R, G, B, W) order.
-        self.OFF = (0, 0, 0, 0)
-        self.WHITE = (255, 255, 255, 0) if white_mode == "RGB" else (0, 0, 0, 255)
-        self.RED = (255, 0, 0, 0)
-        self.GREEN = (0, 255, 0, 0)
-        self.BLUE = (0, 0, 255, 0)
-        self.YELLOW = (255, 200, 0, 0)
+        # Cache simple colour tuples in (R, G, B) order.
+        self.OFF = (0, 0, 0)
+        self.WHITE = (255, 255, 255)
+        self.RED = (255, 0, 0)
+        self.GREEN = (0, 255, 0)
+        self.BLUE = (0, 0, 255)
+        self.YELLOW = (255, 200, 0)
 
         self._named_colors = {
             "off": self.OFF,
@@ -177,32 +166,22 @@ class LedController:
         value = self._to_order(color_rgba)
         self._pixels[segment] = [value] * (segment.stop - segment.start)
 
-    def _to_order(self, color_rgba: Tuple) -> Tuple:
-        """Strip the W channel for non-W strips; the neopixel library handles byte reordering."""
-        r, g, b, w = color_rgba
-        neopixel = self._neopixel
-        try:
-            if self._order in (neopixel.RGB, neopixel.GRB):
-                return (r, g, b)
-            return (r, g, b, w)
-        except Exception:
-            return (r, g, b, w)
+    def _to_order(self, color_rgb: Tuple) -> Tuple:
+        """Pass through (R, G, B); the neopixel library handles byte reordering."""
+        return color_rgb
 
     def _norm_color(
         self,
-        color: Union[str, Tuple[int, int, int], Tuple[int, int, int, int]],
-    ) -> Tuple[int, int, int, int]:
+        color: Union[str, Tuple[int, int, int]],
+    ) -> Tuple[int, int, int]:
         if isinstance(color, str):
             c = self._named_colors.get(color.lower())
             if c is None:
                 raise ValueError(f"Unknown colour name: {color!r}")
             return c
         if isinstance(color, tuple) and len(color) == 3:
-            r, g, b = color
-            return (r, g, b, 0)
-        if isinstance(color, tuple) and len(color) == 4:
             return color
-        raise ValueError("Colour must be a name string or (R,G,B) / (R,G,B,W) tuple")
+        raise ValueError("Colour must be a name string or (R,G,B) tuple")
 
     # ------------------------------------------------------------------
     # Eyes API
@@ -274,7 +253,7 @@ class LedController:
         with self._lock:
             try:
                 if self._pixels is not None:
-                    self._pixels.fill(self._to_order(self.OFF))
+                    self._pixels.fill(self.OFF)
                     self._pixels.show()
             except Exception:
                 pass
