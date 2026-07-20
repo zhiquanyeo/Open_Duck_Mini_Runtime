@@ -4,7 +4,7 @@ Shared controller for a single NeoPixel strip used by eyes and projector.
 LED index layout
 ----------------
 The strip is divided into three contiguous segments, in this order:
-projector, right eye, left eye. Each segment's pixel count is
+projector, left eye, right eye. Each segment's pixel count is
 configurable (see ``led_counts`` in ``duck_config.json``) so eyes/
 flashlight built from LED rings or clusters are supported, not just a
 single pixel per feature.
@@ -73,12 +73,12 @@ class LedController:
                 )
 
         n_proj = counts["projector"]
-        n_right = counts["right_eye"]
         n_left = counts["left_eye"]
+        n_right = counts["right_eye"]
         self._proj_slice = slice(0, n_proj)
-        self._right_slice = slice(n_proj, n_proj + n_right)
-        self._left_slice = slice(n_proj + n_right, n_proj + n_right + n_left)
-        num_pixels = n_proj + n_right + n_left
+        self._left_slice = slice(n_proj, n_proj + n_left)
+        self._right_slice = slice(n_proj + n_left, n_proj + n_left + n_right)
+        num_pixels = n_proj + n_left + n_right
 
         # Allow duck_config to override pixel order (env var takes priority).
         order_name = _ORDER_NAME
