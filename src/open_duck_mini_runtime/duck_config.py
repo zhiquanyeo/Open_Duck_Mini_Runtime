@@ -7,11 +7,7 @@ logger = logging.getLogger(__name__)
 
 HOME_DIR = os.path.expanduser("~")
 
-# todo did i ever actually implement this? i think i did, but check. if not, implement it.
-# some neopixels are GRBW, some are RGBW, some are RGB...
-# fill in the order of whatever you picked here
-LED_ORDER: str = os.getenv("ODUCK_LED_ORDER", "GRBW").upper()
-LED_WHITE_MODE: str = os.getenv("ODUCK_LED_WHITE_MODE", "W").upper()
+LED_ORDER: str = os.getenv("ODUCK_LED_ORDER", "GRB").upper()
 
 
 class DuckConfig:
