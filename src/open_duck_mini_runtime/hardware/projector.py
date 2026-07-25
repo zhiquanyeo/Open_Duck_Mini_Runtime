@@ -13,6 +13,9 @@ class Projector:
         self.on = not self.on
         self.ctrl.set_projector(self.on)
 
+    def set_brightness(self, value: float) -> None:
+        self.ctrl.set_projector_brightness(value)
+
     def stop(self):
         self.on = False
         self.ctrl.set_projector(False)

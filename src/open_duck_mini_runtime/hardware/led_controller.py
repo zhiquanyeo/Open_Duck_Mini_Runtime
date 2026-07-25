@@ -31,6 +31,18 @@ from typing import Dict, Tuple, Optional, Union
 # original fixed 1/1/1 layout.
 DEFAULT_LED_COUNTS: Dict[str, int] = {"projector": 1, "right_eye": 1, "left_eye": 1}
 
+# Per-segment brightness multiplier (0.0-1.0), runtime-adjustable via
+# set_left_eye_brightness() / set_right_eye_brightness() / set_projector_brightness().
+DEFAULT_SEGMENT_BRIGHTNESS: Dict[str, float] = {
+    "projector": 1.0,
+    "right_eye": 1.0,
+    "left_eye": 1.0,
+}
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
 # Allow pixel order / brightness overrides via environment variables so they
 # can be set in a systemd unit or SSH session without touching the code.
 _ORDER_NAME: str = os.getenv("ODUCK_LED_ORDER", "GRB").upper()
@@ -132,6 +144,9 @@ class LedController:
         self.right_color = self.WHITE
         self.proj_color = self.WHITE
 
+        # Per-segment brightness multiplier, runtime-adjustable.
+        self._segment_brightness: Dict[str, float] = dict(DEFAULT_SEGMENT_BRIGHTNESS)
+
         self._apply()
 
         atexit.register(self.deinit)
@@ -156,15 +171,30 @@ class LedController:
             if proj_color is None:
                 proj_color = self.proj_color if self.projector_on else self.OFF
 
-            self._fill(self._proj_slice, proj_color)
-            self._fill(self._right_slice, right_color)
-            self._fill(self._left_slice, left_color)
+            self._fill(
+                self._proj_slice,
+                self._scale(proj_color, self._segment_brightness["projector"]),
+            )
+            self._fill(
+                self._right_slice,
+                self._scale(right_color, self._segment_brightness["right_eye"]),
+            )
+            self._fill(
+                self._left_slice,
+                self._scale(left_color, self._segment_brightness["left_eye"]),
+            )
             self._pixels.show()
 
     def _fill(self, segment: slice, color_rgba: Tuple) -> None:
         """Paint every pixel in ``segment`` the same colour."""
         value = self._to_order(color_rgba)
         self._pixels[segment] = [value] * (segment.stop - segment.start)
+
+    def _scale(self, color: Tuple, factor: float) -> Tuple:
+        """Scale an (R, G, B) tuple by a 0.0-1.0 brightness factor."""
+        if factor >= 1.0:
+            return color
+        return tuple(int(round(c * factor)) for c in color)
 
     def _to_order(self, color_rgb: Tuple) -> Tuple:
         """Pass through (R, G, B); the neopixel library handles byte reordering."""
@@ -235,6 +265,37 @@ class LedController:
         self.left_color = norm
         self.right_color = norm
         self.proj_color = norm
+        self._apply()
+
+    # ------------------------------------------------------------------
+    # Brightness API
+    # ------------------------------------------------------------------
+
+    def set_brightness(self, value: float) -> None:
+        """Set the overall strip brightness (0.0-1.0), applied on top of
+        each segment's own brightness multiplier."""
+        if self._pixels is None or self._deinited:
+            return
+        with self._lock:
+            self._pixels.brightness = _clamp01(value)
+            self._pixels.show()
+
+    def set_left_eye_brightness(self, value: float) -> None:
+        self._segment_brightness["left_eye"] = _clamp01(value)
+        self._apply()
+
+    def set_right_eye_brightness(self, value: float) -> None:
+        self._segment_brightness["right_eye"] = _clamp01(value)
+        self._apply()
+
+    def set_eyes_brightness(self, value: float) -> None:
+        v = _clamp01(value)
+        self._segment_brightness["left_eye"] = v
+        self._segment_brightness["right_eye"] = v
+        self._apply()
+
+    def set_projector_brightness(self, value: float) -> None:
+        self._segment_brightness["projector"] = _clamp01(value)
         self._apply()
 
     def all_off(self) -> None:

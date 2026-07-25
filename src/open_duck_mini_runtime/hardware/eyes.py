@@ -143,6 +143,30 @@ class Eyes:
         self.ctrl.set_eyes_color(color)
         self.ctrl.set_eyes(True)
 
+    def set_brightness(self, value: float) -> None:
+        """Overall strip brightness (neopixel mode only; no-op for original GPIO eyes)."""
+        if not self._neopixels:
+            return
+        self.ctrl.set_brightness(value)
+
+    def set_left_eye_brightness(self, value: float) -> None:
+        """Per-segment brightness for the left eye (neopixel mode only)."""
+        if not self._neopixels:
+            return
+        self.ctrl.set_left_eye_brightness(value)
+
+    def set_right_eye_brightness(self, value: float) -> None:
+        """Per-segment brightness for the right eye (neopixel mode only)."""
+        if not self._neopixels:
+            return
+        self.ctrl.set_right_eye_brightness(value)
+
+    def set_eyes_brightness(self, value: float) -> None:
+        """Per-segment brightness for both eyes (neopixel mode only)."""
+        if not self._neopixels:
+            return
+        self.ctrl.set_eyes_brightness(value)
+
     def set_solid(self, solid: bool) -> None:
         """
         Neopixel mode  — suppress blinking (eyes stay on) when ``solid=True``.
