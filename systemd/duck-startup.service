@@ -1,0 +1,15 @@
+[Unit]
+Description=Open Duck Mini startup supervisor (gamepad wait + eye animation + walk/head-puppet handoff)
+After=multi-user.target
+
+[Service]
+Type=simple
+# Adjust User/WorkingDirectory/ExecStart for your install location.
+User=zq
+WorkingDirectory=/home/zq/dev/Open_Duck_Mini_Runtime
+ExecStart=/home/zq/.local/bin/uv run duck-startup
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

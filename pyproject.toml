@@ -35,6 +35,7 @@ Homepage = "https://github.com/apirrone/Open_Duck_Mini_Runtime"
 walk = "open_duck_mini_runtime.rl_walk.walk:main"
 walk-keyboard = "open_duck_mini_runtime.rl_walk.walk_keyboard:main"
 walk-watchdog = "open_duck_mini_runtime.watchdog:main"
+duck-startup = "open_duck_mini_runtime.startup:main"
 
 [dependency-groups]
 dev = [

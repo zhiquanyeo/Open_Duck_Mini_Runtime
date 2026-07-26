@@ -44,6 +44,7 @@ class RLWalk:
         save_obs=False,
         replay_obs=None,
         cutoff_frequency=None,
+        head_only=False,
     ):
 
         self.duck_config = DuckConfig(config_json_path=duck_config_path)
@@ -114,7 +115,9 @@ class RLWalk:
 
         self.command_freq = 20  # hz
         if self.commands:
-            self.xbox_controller = XBoxController(self.command_freq)
+            self.xbox_controller = XBoxController(
+                self.command_freq, only_head_control=head_only
+            )
 
         # Reference motion, but we only really need the length of one phase
         self.PRM = PolyReferenceMotion(
@@ -550,6 +553,12 @@ def main():
     )
     parser.add_argument("--cutoff_frequency", type=float, default=None)
     parser.add_argument(
+        "--head_only",
+        action="store_true",
+        default=False,
+        help="Head-puppet mode: gamepad only drives the head, not locomotion",
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default=None,
@@ -585,6 +594,7 @@ def main():
         save_obs=args.save_obs,
         replay_obs=args.replay_obs,
         cutoff_frequency=args.cutoff_frequency,
+        head_only=args.head_only,
     )
     logger.debug("RLWalk ready")
     rl_walk.run()
