@@ -22,6 +22,7 @@ from open_duck_mini_runtime.log import setup_logging, TRACE
 
 import os
 import signal
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -290,11 +291,14 @@ class RLWalk:
         return False
 
     def run(self):
+        """Returns True if the caller should relaunch into mode selection
+        (LB+RB+B pressed while paused), False on a normal shutdown."""
         signal.signal(
             signal.SIGTERM, lambda s, f: (_ for _ in ()).throw(KeyboardInterrupt())
         )
 
         i = 0
+        restart_requested = False
         try:
             logger.info("Starting main loop")
             start_t = time.time()
@@ -307,6 +311,19 @@ class RLWalk:
                     self.last_commands, self.buttons, left_trigger, right_trigger = (
                         self.xbox_controller.get_last_command()
                     )
+
+                    if (
+                        self.paused
+                        and self.buttons.LB.is_pressed
+                        and self.buttons.RB.is_pressed
+                        and self.buttons.B.triggered
+                    ):
+                        logger.info(
+                            "LB+RB+B pressed while paused — exiting to mode selection"
+                        )
+                        restart_requested = True
+                        break
+
                     if self.buttons.dpad_up.triggered:
                         self.phase_frequency_factor_offset += 0.05
                         logger.info(
@@ -495,6 +512,8 @@ class RLWalk:
                 time.sleep(max(0, 1 / self.control_freq - took))
 
         except KeyboardInterrupt:
+            pass
+        finally:
             if self.duck_config.antennas:
                 self.antennas.stop()
             if self.duck_config.eyes:
@@ -507,6 +526,8 @@ class RLWalk:
 
         if self.save_obs:
             pickle.dump(self.saved_obs, open("robot_saved_obs.pkl", "wb"))
+
+        return restart_requested
 
 
 def main():
@@ -597,7 +618,11 @@ def main():
         head_only=args.head_only,
     )
     logger.debug("RLWalk ready")
-    rl_walk.run()
+    restart_requested = rl_walk.run()
+    if restart_requested:
+        # Non-zero exit lets a process supervisor (e.g. systemd Restart=on-failure)
+        # relaunch us into a fresh mode-selection state.
+        sys.exit(1)
 
 
 if __name__ == "__main__":

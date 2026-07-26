@@ -22,6 +22,7 @@ scratch.
 import argparse
 import logging
 import os
+import sys
 import time
 
 import pygame
@@ -168,7 +169,16 @@ def run(onnx_model_path: str, duck_config_path: str) -> None:
             commands=True,
             head_only=(mode == "head_puppet"),
         )
-        rl_walk.run()
+        restart_requested = rl_walk.run()
+        if restart_requested:
+            # RLWalk has already turned off motors and stopped its own
+            # eyes/antennas/projector/feet_contacts. Exit non-zero so the
+            # service supervisor (systemd Restart=on-failure) relaunches this
+            # whole process fresh — that's what guarantees the servo serial
+            # port and IMU I2C thread are actually released before the next
+            # RLWalk tries to open them again.
+            logger.info("Restart requested — exiting for supervisor relaunch")
+            sys.exit(1)
     except KeyboardInterrupt:
         if eyes is not None:
             eyes.stop()
