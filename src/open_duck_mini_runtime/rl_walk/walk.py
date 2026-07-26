@@ -17,6 +17,7 @@ from open_duck_mini_runtime.rl_walk.rl_utils import (
     make_action_dict,
     LowPassActionFilter,
 )
+from open_duck_mini_runtime.rl_walk.stats_server import StatsServer
 from open_duck_mini_runtime.duck_config import DuckConfig
 from open_duck_mini_runtime.log import setup_logging, TRACE
 
@@ -51,6 +52,7 @@ class RLWalk:
         self.duck_config = DuckConfig(config_json_path=duck_config_path)
 
         self.commands = commands
+        self.head_only = head_only
         self.pitch_bias = pitch_bias
 
         self.onnx_model_path = onnx_model_path
@@ -152,10 +154,37 @@ class RLWalk:
         if self.duck_config.antennas:
             self.antennas = Antennas()
 
+        self.stats_server = None
+        if self.duck_config.web_stats_enabled:
+            self.stats_server = StatsServer(
+                self.get_stats, port=self.duck_config.web_stats_port
+            )
+
     @staticmethod
     def _ec(color):
         """Normalize an eye color from config (list or string) to what Eyes.set_color accepts."""
         return tuple(color) if isinstance(color, list) else color
+
+    def get_stats(self) -> dict:
+        resultant_factor = self.phase_frequency_factor + self.phase_frequency_factor_offset
+        gait_hz = (
+            self.control_freq * resultant_factor / self.PRM.nb_steps_in_period
+        )
+        return {
+            "mode": "head_puppet" if self.head_only else "walk",
+            "paused": self.paused,
+            "motors_enabled": self.motors_enabled,
+            "gamepad_connected": (
+                self.xbox_controller.connected if self.commands else False
+            ),
+            "phase_frequency_factor": round(self.phase_frequency_factor, 3),
+            "phase_frequency_factor_offset": round(
+                self.phase_frequency_factor_offset, 3
+            ),
+            "resultant_frequency_factor": round(resultant_factor, 3),
+            "gait_frequency_hz": round(gait_hz, 3),
+            "control_freq_hz": self.control_freq,
+        }
 
     def get_obs(self):
 
@@ -514,6 +543,8 @@ class RLWalk:
         except KeyboardInterrupt:
             pass
         finally:
+            if self.stats_server is not None:
+                self.stats_server.stop()
             if self.duck_config.antennas:
                 self.antennas.stop()
             if self.duck_config.eyes:

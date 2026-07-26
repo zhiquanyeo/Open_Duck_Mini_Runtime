@@ -24,6 +24,12 @@
         "camera": false
     },
 
+    "web_stats": {
+        "_comment": "Serves a read-only stats page (control mode, pause state, gait frequency, etc.) at http://<duck-ip>:<port>/",
+        "enabled": false,
+        "port": 8080
+    },
+
     "led_counts": {
         "_comment": "Number of NeoPixel LEDs wired to each segment of the strip, in strip order (projector, then right eye, then left eye). Only used when neopixels=true. Defaults to 1/1/1 if omitted.",
         "projector": 1,

@@ -77,6 +77,10 @@ class DuckConfig:
         self.microphone = expression_features.get("microphone", False)
         self.camera = expression_features.get("camera", False)
 
+        web_stats = self.json_config.get("web_stats", {})
+        self.web_stats_enabled = web_stats.get("enabled", False)
+        self.web_stats_port = web_stats.get("port", 8080)
+
         self.led_order = self.json_config.get("led_order", "GRBW")
 
         led_counts = self.json_config.get("led_counts", {})
