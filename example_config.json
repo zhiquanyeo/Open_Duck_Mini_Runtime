@@ -25,7 +25,7 @@
     },
 
     "web_stats": {
-        "_comment": "Serves a read-only stats page (control mode, pause state, gait frequency, etc.) at http://<duck-ip>:<port>/",
+        "_comment": "Serves a stats page (control mode, pause state, gait frequency, etc.) at http://<duck-ip>:<port>/, with a Shutdown button (POST /shutdown) to stop duck-startup without SSH.",
         "enabled": false,
         "port": 8080
     },

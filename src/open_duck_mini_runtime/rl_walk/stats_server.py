@@ -1,19 +1,40 @@
 """
-Minimal read-only stats webserver for the Open Duck Mini.
+Stats + remote-shutdown webserver for the Open Duck Mini.
 
 Serves a live JSON snapshot (control mode, pause state, gait frequency,
-etc.) plus a small auto-refreshing HTML page. Built on the stdlib
-http.server rather than a web framework — it's a handful of read-only
-fields, and this is a Pi Zero 2W.
+etc.) plus a small auto-refreshing HTML page, and a POST /shutdown
+endpoint to stop the duck-startup service without needing SSH access.
+Built on the stdlib http.server rather than a web framework — it's a
+handful of read-only fields, and this is a Pi Zero 2W.
 """
 
 import json
 import logging
+import os
+import signal
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict
 
 logger = logging.getLogger(__name__)
+
+# How long to wait for the process's own SIGTERM handler to clean up and
+# exit before giving up on it and forcing the issue. Mirrors TimeoutStopSec
+# in systemd/duck-startup.service so both shutdown paths behave the same.
+_HARD_KILL_DELAY_S = 10.0
+
+
+def _request_shutdown() -> None:
+    logger.warning("Remote shutdown requested via /shutdown")
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(_HARD_KILL_DELAY_S)
+    logger.warning(
+        "Graceful shutdown did not finish within %.0fs, forcing exit",
+        _HARD_KILL_DELAY_S,
+    )
+    os.kill(os.getpid(), signal.SIGKILL)
+
 
 _PAGE = b"""<!doctype html>
 <html>
@@ -26,12 +47,18 @@ _PAGE = b"""<!doctype html>
   td { padding: 0.25rem 1rem; }
   td.key { color: #8ab4f8; text-align: right; }
   #err { color: #f28b82; }
+  #shutdown { margin-top: 1.5rem; padding: 0.5rem 1rem; background: #5c1a1a; color: #eee;
+              border: 1px solid #f28b82; border-radius: 4px; cursor: pointer; font-family: inherit; }
+  #shutdown:hover { background: #7a2323; }
+  #shutdownMsg { margin-top: 0.5rem; color: #f28b82; }
 </style>
 </head>
 <body>
 <h1>Open Duck Mini</h1>
 <table id="stats"></table>
 <div id="err"></div>
+<button id="shutdown">Shutdown duck</button>
+<div id="shutdownMsg"></div>
 <script>
 async function refresh() {
   try {
@@ -47,6 +74,16 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 1000);
+
+document.getElementById('shutdown').addEventListener('click', async () => {
+  if (!confirm('Shut down the duck-startup service now?')) return;
+  try {
+    await fetch('/shutdown', { method: 'POST' });
+    document.getElementById('shutdownMsg').textContent = 'Shutdown requested.';
+  } catch (e) {
+    document.getElementById('shutdownMsg').textContent = 'Shutdown request failed: ' + e;
+  }
+});
 </script>
 </body>
 </html>
@@ -87,6 +124,15 @@ class StatsServer:
                     self._send(200, body, "application/json")
                 elif self.path == "/":
                     self._send(200, _PAGE, "text/html")
+                else:
+                    self._send(404, b"not found", "text/plain")
+
+            def do_POST(self):
+                if self.path == "/shutdown":
+                    self._send(202, b"shutdown requested", "text/plain")
+                    # Respond before killing the process this handler is
+                    # running in, otherwise the client never sees the 202.
+                    threading.Thread(target=_request_shutdown, daemon=True).start()
                 else:
                     self._send(404, b"not found", "text/plain")
 

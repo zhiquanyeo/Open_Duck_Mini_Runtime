@@ -10,6 +10,10 @@ WorkingDirectory=/home/zq/dev/Open_Duck_Mini_Runtime
 ExecStart=/home/zq/.local/bin/uv run duck-startup
 Restart=on-failure
 RestartSec=2
+# Cleanup (motor/thread teardown) can occasionally hang on hardware I/O;
+# don't let `systemctl stop` block on the default 90s timeout waiting for it —
+# escalate to SIGKILL after 10s so stop commands stay responsive.
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
