@@ -28,6 +28,8 @@ uv run pytest -m hardware                          # motor EEPROM config check (
 
 # Calibration tools
 python3 tools/find_soft_offsets.py    # find joint offsets interactively
+python3 tools/find_all_motor_offsets.py  # calibrate all joint offsets at once by hand
+python3 tools/adjust_offsets.py       # nudge a single joint's offset live with the keyboard
 python3 tools/controller_info.py      # identify gamepad axis/button indices
 python3 tools/check_voltage.py        # verify servo bus voltage
 python3 tools/batch_reconfigure.py    # verify/fix motor EEPROM config (PID, mode, sync-read/write settings)
