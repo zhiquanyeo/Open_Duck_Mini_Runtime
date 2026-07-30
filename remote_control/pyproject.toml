@@ -13,3 +13,4 @@ dependencies = [
 
 [project.scripts]
 duck-remote = "duck_remote.relay:main"
+duck-remote-fake-host = "duck_remote.fake_host:main"
