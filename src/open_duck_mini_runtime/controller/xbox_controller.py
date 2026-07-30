@@ -41,6 +41,9 @@ class XBoxController:
         self.LB_pressed = False
         self.RB_pressed = False
         self.start_pressed = False
+        self.back_pressed = False
+        self.LStickButton_pressed = False
+        self.RStickButton_pressed = False
 
         self.buttons = Buttons()
 
@@ -80,6 +83,9 @@ class XBoxController:
         if not self.connected or self.p1 is None:
             return (
                 np.around(self.last_commands, 3),
+                False,
+                False,
+                False,
                 False,
                 False,
                 False,
@@ -188,6 +194,15 @@ class XBoxController:
                 if n_buttons > 11 and self.p1.get_button(11):  # Start / Menu button
                     self.start_pressed = True
 
+                if n_buttons > 10 and self.p1.get_button(10):  # Back / Select / View
+                    self.back_pressed = True
+
+                if n_buttons > 13 and self.p1.get_button(13):  # Left stick click
+                    self.LStickButton_pressed = True
+
+                if n_buttons > 14 and self.p1.get_button(14):  # Right stick click
+                    self.RStickButton_pressed = True
+
             if event.type == pygame.JOYBUTTONUP:
                 self.A_pressed = False
                 self.B_pressed = False
@@ -196,6 +211,9 @@ class XBoxController:
                 self.LB_pressed = False
                 self.RB_pressed = False
                 self.start_pressed = False
+                self.back_pressed = False
+                self.LStickButton_pressed = False
+                self.RStickButton_pressed = False
 
         up_down = self.p1.get_hat(0)[1] if self.p1.get_numhats() > 0 else 0
         pygame.event.pump()  # process event queue
@@ -209,6 +227,9 @@ class XBoxController:
             self.LB_pressed,
             self.RB_pressed,
             self.start_pressed,
+            self.back_pressed,
+            self.LStickButton_pressed,
+            self.RStickButton_pressed,
             left_trigger,
             right_trigger,
             up_down,
@@ -222,6 +243,9 @@ class XBoxController:
         LB_pressed = False
         RB_pressed = False
         start_pressed = False
+        back_pressed = False
+        LStickButton_pressed = False
+        RStickButton_pressed = False
         up_down = 0
         try:
             (
@@ -233,6 +257,9 @@ class XBoxController:
                 LB_pressed,
                 RB_pressed,
                 start_pressed,
+                back_pressed,
+                LStickButton_pressed,
+                RStickButton_pressed,
                 self.last_left_trigger,
                 self.last_right_trigger,
                 up_down,
@@ -252,6 +279,9 @@ class XBoxController:
             up_down == 1,
             up_down == -1,
             start=start_pressed,
+            back=back_pressed,
+            LStickButton=LStickButton_pressed,
+            RStickButton=RStickButton_pressed,
         )
 
         return (

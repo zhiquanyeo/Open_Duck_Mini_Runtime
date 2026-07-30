@@ -38,8 +38,25 @@ class Buttons:
         self.dpad_up = Button()
         self.dpad_down = Button()
         self.START = Button()
+        self.BACK = Button()
+        self.LStickButton = Button()
+        self.RStickButton = Button()
 
-    def update(self, A, B, X, Y, LB, RB, dpad_up, dpad_down, start=False):
+    def update(
+        self,
+        A,
+        B,
+        X,
+        Y,
+        LB,
+        RB,
+        dpad_up,
+        dpad_down,
+        start=False,
+        back=False,
+        LStickButton=False,
+        RStickButton=False,
+    ):
         self.A.update(A)
         self.B.update(B)
         self.X.update(X)
@@ -49,6 +66,9 @@ class Buttons:
         self.dpad_up.update(dpad_up)
         self.dpad_down.update(dpad_down)
         self.START.update(start)
+        self.BACK.update(back)
+        self.LStickButton.update(LStickButton)
+        self.RStickButton.update(RStickButton)
 
 
 if __name__ == "__main__":
