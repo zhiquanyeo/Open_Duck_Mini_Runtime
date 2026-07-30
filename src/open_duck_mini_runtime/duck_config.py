@@ -81,6 +81,10 @@ class DuckConfig:
         self.web_stats_enabled = web_stats.get("enabled", False)
         self.web_stats_port = web_stats.get("port", 8080)
 
+        remote_control = self.json_config.get("remote_control", {})
+        self.remote_control_enabled = remote_control.get("enabled", False)
+        self.remote_control_port = remote_control.get("port", 10000)
+
         self.led_order = self.json_config.get("led_order", "GRBW")
 
         led_counts = self.json_config.get("led_counts", {})

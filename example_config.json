@@ -30,6 +30,12 @@
         "port": 8080
     },
 
+    "remote_control": {
+        "_comment": "When enabled, RLWalk listens for gamepad commands over UDP from the remote_control PC-side app instead of reading a locally paired gamepad. Leave disabled to keep using a gamepad (incl. Bluetooth) paired directly to the duck.",
+        "enabled": false,
+        "port": 10000
+    },
+
     "led_counts": {
         "_comment": "Number of NeoPixel LEDs wired to each segment of the strip, in strip order (projector, then right eye, then left eye). Only used when neopixels=true. Defaults to 1/1/1 if omitted.",
         "projector": 1,

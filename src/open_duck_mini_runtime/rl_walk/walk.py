@@ -9,6 +9,7 @@ from open_duck_mini_runtime.hardware.raw_imu import Imu
 from open_duck_mini_runtime.rl_walk.poly_reference_motion import PolyReferenceMotion
 from open_duck_mini_runtime.hardware.feet_contacts import FeetContacts
 from open_duck_mini_runtime.controller.xbox_controller import XBoxController
+from open_duck_mini_runtime.controller.remote_controller import RemoteController
 from open_duck_mini_runtime.hardware.eyes import Eyes
 from open_duck_mini_runtime.hardware.sounds import Sounds
 from open_duck_mini_runtime.hardware.antennas import Antennas
@@ -118,9 +119,16 @@ class RLWalk:
 
         self.command_freq = 20  # hz
         if self.commands:
-            self.xbox_controller = XBoxController(
-                self.command_freq, only_head_control=head_only
-            )
+            if self.duck_config.remote_control_enabled:
+                self.controller = RemoteController(
+                    self.command_freq,
+                    port=self.duck_config.remote_control_port,
+                    only_head_control=head_only,
+                )
+            else:
+                self.controller = XBoxController(
+                    self.command_freq, only_head_control=head_only
+                )
 
         # Reference motion, but we only really need the length of one phase
         self.PRM = PolyReferenceMotion(
@@ -175,7 +183,7 @@ class RLWalk:
             "paused": self.paused,
             "motors_enabled": self.motors_enabled,
             "gamepad_connected": (
-                self.xbox_controller.connected if self.commands else False
+                self.controller.connected if self.commands else False
             ),
             "phase_frequency_factor": round(self.phase_frequency_factor, 3),
             "phase_frequency_factor_offset": round(
@@ -338,7 +346,7 @@ class RLWalk:
 
                 if self.commands:
                     self.last_commands, self.buttons, left_trigger, right_trigger = (
-                        self.xbox_controller.get_last_command()
+                        self.controller.get_last_command()
                     )
 
                     if (
@@ -587,7 +595,9 @@ def main():
         "--commands",
         action="store_true",
         default=True,
-        help="external commands, keyboard or gamepad. Launch control_server.py on host computer",
+        help="external commands, keyboard or gamepad. For a gamepad plugged into a "
+        "separate PC, enable remote_control in duck_config.json and run the "
+        "remote_control PC-side app",
     )
     parser.add_argument(
         "--save_obs",

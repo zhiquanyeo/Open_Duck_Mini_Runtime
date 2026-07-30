@@ -194,6 +194,47 @@ When using `"controller_type": "generic_usb"`, add an optional `generic_usb_cont
 }
 ```
 
+### Remote Control (gamepad on a separate PC)
+
+If you'd rather plug/pair a gamepad into a desktop PC or Steam Deck instead
+of pairing it directly to the duck, enable `remote_control` in
+`duck_config.json`:
+
+```json
+{
+  "remote_control": {
+    "enabled": true,
+    "port": 10000
+  }
+}
+```
+
+With this enabled, `walk` listens for gamepad commands over UDP on that
+port instead of reading a locally paired gamepad. Leave it disabled (the
+default) to keep controlling the duck with a gamepad — including a
+Bluetooth one — paired directly to it, exactly as before.
+
+On the PC (Windows, Linux, or Steam Deck in Desktop Mode), install and run
+the relay app in `remote_control/`:
+
+```bash
+cd remote_control
+uv sync
+uv run duck-remote --host <duck-ip>
+```
+
+It reads the local gamepad and streams commands to the duck; the duck does
+all axis scaling/range clamping itself, so a compromised or buggy remote
+client can't push the robot outside its configured physical limits. Notes:
+
+- **WSL**: raw USB gamepad passthrough isn't automatic under WSL2 — run
+  `duck-remote` as a native Windows process, or set up
+  [usbipd-win](https://github.com/dorssel/usbipd-win) if you specifically
+  need it inside WSL.
+- **Network trust**: the duck accepts UDP control packets from anyone who
+  can reach `port` on its network — only enable this on a network you
+  trust.
+
 ---
 
 ## Hardware Configuration
@@ -329,6 +370,8 @@ src/open_duck_mini_runtime/
 │
 ├── controller/             # Gamepad / keyboard input
 │   ├── xbox_controller.py  #   Xbox / generic pygame joystick
+│   ├── remote_controller.py#   UDP-sourced controller for a PC-side relay
+│   ├── command_shaping.py  #   Axis→command scaling, shared by both controllers
 │   └── buttons.py          #   Button debounce state machine
 │
 └── rl_walk/                # RL policy and main walk loop
@@ -337,6 +380,10 @@ src/open_duck_mini_runtime/
     ├── poly_reference_motion.py  # Polynomial gait reference
     └── rl_utils.py         #   Action filters, coordinate helpers
 ```
+
+`remote_control/` at the repo root is a separate, standalone package (its
+own `pyproject.toml`) meant to run on a PC/Steam Deck rather than the duck —
+see [Remote Control](#remote-control-gamepad-on-a-separate-pc) above.
 
 ---
 

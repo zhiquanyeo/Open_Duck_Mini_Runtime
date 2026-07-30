@@ -41,7 +41,7 @@ Three-layer design running at 50 Hz:
 
 **Hardware layer** (`hardware/`): `HWI` manages 14 DOFs over `/dev/ttyACM0` at 1 Mbaud using the `rustypot` library (Feetech STS3215 protocol). `Imu` wraps a BNO055 I2C sensor sampled in a background thread at 50 Hz and exposes cached gyro/accel/gravity values. Expression peripherals (eyes, antennas, projector, speaker, camera) are all optional and gated by `expression_features` in config.
 
-**Controller layer** (`controller/`): `XBoxController` polls Xbox/DualSense/generic USB gamepad or keyboard at 20 Hz in a background thread. Supports custom axis/button remapping for generic USB controllers via config.
+**Controller layer** (`controller/`): `XBoxController` polls Xbox/DualSense/generic USB gamepad or keyboard at 20 Hz in a background thread. Supports custom axis/button remapping for generic USB controllers via config. `RemoteController` is a drop-in alternative (same `.connected`/`.get_last_command()` interface) sourced from UDP packets instead of a local gamepad — used when `remote_control.enabled` is set in config, for driving the duck from a gamepad plugged into a separate PC/Steam Deck (see `remote_control/` at the repo root, a standalone PC-side package). Both controllers share axis-scaling/range-clamping logic via `command_shaping.py`.
 
 **RL walk layer** (`rl_walk/`): `RLWalk` in `walk.py` is the main orchestrator. `OnnxInfer` wraps the ONNX policy (initialized with `awd=True`). `PolyReferenceMotion` provides a gait phase signal. `LowPassActionFilter` in `rl_utils.py` optionally smooths actions.
 
