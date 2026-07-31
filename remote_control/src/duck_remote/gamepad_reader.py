@@ -1,7 +1,7 @@
 """
 Local gamepad reader for the PC-side relay.
 
-Deliberately uses pygame's SDL_GameController API (`pygame.controller`)
+Deliberately uses pygame's SDL_GameController API (`pygame._sdl2.controller`)
 rather than the raw `pygame.joystick` button-index API that
 open_duck_mini_runtime.controller.xbox_controller uses on the duck. Raw
 joystick button indices are driver/platform-dependent (the duck's indices
@@ -10,11 +10,17 @@ SDL_GameController normalizes physical buttons to logical names
 (A/B/X/Y/LEFTSHOULDER/...) the same way on Windows, Linux, and SteamOS, via
 SDL's built-in controller database. That's what makes this reader portable
 across desktop PC, WSL-with-USB-passthrough, and Steam Deck.
+
+Note: in pygame 2.6.x this API lives at `pygame._sdl2.controller`, not the
+top-level `pygame.controller` some older docs/examples reference. The
+CONTROLLER_* button/axis constants are still on the top-level `pygame`
+namespace though.
 """
 
 import logging
 
 import pygame
+import pygame._sdl2.controller as sdl_controller
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +34,8 @@ class GamepadReader:
     def __init__(self, controller_index: int = 0):
         pygame.init()
         pygame.joystick.init()
-        if not pygame.controller.get_init():
-            pygame.controller.init()
+        if not sdl_controller.get_init():
+            sdl_controller.init()
 
         self.controller_index = controller_index
         self.controller = None
@@ -37,16 +43,16 @@ class GamepadReader:
         self._try_connect()
 
     def _try_connect(self) -> bool:
-        pygame.controller.quit()
-        pygame.controller.init()
-        if pygame.controller.get_count() <= self.controller_index:
+        sdl_controller.quit()
+        sdl_controller.init()
+        if sdl_controller.get_count() <= self.controller_index:
             self.connected = False
             self.controller = None
             return False
 
-        self.controller = pygame.controller.Controller(self.controller_index)
+        self.controller = sdl_controller.Controller(self.controller_index)
         self.controller.init()
-        logger.info("Connected: %s", self.controller.get_name())
+        logger.info("Connected: %s", self.controller.name)
         self.connected = True
         return True
 
