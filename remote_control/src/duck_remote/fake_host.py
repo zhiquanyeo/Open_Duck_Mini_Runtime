@@ -28,8 +28,21 @@ _RENDER_INTERVAL = 0.05
 CLEAR_SCREEN = "\033[2J\033[H"
 
 
+def _dpad_label(dpad_x, dpad_y):
+    parts = []
+    if dpad_y == 1:
+        parts.append("up")
+    elif dpad_y == -1:
+        parts.append("down")
+    if dpad_x == 1:
+        parts.append("right")
+    elif dpad_x == -1:
+        parts.append("left")
+    return "+".join(parts) if parts else "(none)"
+
+
 def _render(host, port, connected, age, packet_count, head_control_mode,
-            last_commands, left_trigger, right_trigger, buttons):
+            last_commands, left_trigger, right_trigger, buttons, dpad_x, dpad_y):
     print(CLEAR_SCREEN, end="")
     print("======")
     print("DUCK-REMOTE FAKE HOST")
@@ -43,6 +56,7 @@ def _render(host, port, connected, age, packet_count, head_control_mode,
     print(f"mode:      {'head-control' if head_control_mode else 'locomotion'}")
     print(f"commands:  {[round(c, 3) for c in last_commands]}")
     print(f"triggers:  L={left_trigger:.2f}  R={right_trigger:.2f}")
+    print(f"dpad:      {_dpad_label(dpad_x, dpad_y)}")
     pressed = [name for name, v in buttons.items() if v]
     print(f"buttons:   {', '.join(pressed) if pressed else '(none)'}")
     print()
@@ -75,6 +89,8 @@ def main():
     buttons = {}
     left_trigger = 0.0
     right_trigger = 0.0
+    dpad_x = 0
+    dpad_y = 0
 
     try:
         while True:
@@ -96,6 +112,8 @@ def main():
                     r_x = float(axes.get("r_x", 0.0))
                     left_trigger = float(packet.get("left_trigger", 0.0))
                     right_trigger = float(packet.get("right_trigger", 0.0))
+                    dpad_x = int(packet.get("dpad_x", 0))
+                    dpad_y = int(packet.get("dpad_y", 0))
                     buttons = packet.get("buttons", {})
 
                     Y_pressed = bool(buttons.get("Y", False))
@@ -118,6 +136,8 @@ def main():
                 buttons = {}
                 left_trigger = 0.0
                 right_trigger = 0.0
+                dpad_x = 0
+                dpad_y = 0
 
             _render(
                 args.host,
@@ -130,6 +150,8 @@ def main():
                 left_trigger,
                 right_trigger,
                 buttons,
+                dpad_x,
+                dpad_y,
             )
             time.sleep(_RENDER_INTERVAL)
     except KeyboardInterrupt:

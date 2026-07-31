@@ -77,6 +77,12 @@ class GamepadReader:
         elif c.get_button(pygame.CONTROLLER_BUTTON_DPAD_DOWN):
             dpad_y = -1
 
+        dpad_x = 0
+        if c.get_button(pygame.CONTROLLER_BUTTON_DPAD_RIGHT):
+            dpad_x = 1
+        elif c.get_button(pygame.CONTROLLER_BUTTON_DPAD_LEFT):
+            dpad_x = -1
+
         return {
             "axes": {
                 "l_x": -1 * c.get_axis(pygame.CONTROLLER_AXIS_LEFTX),
@@ -86,6 +92,7 @@ class GamepadReader:
             "left_trigger": trigger(pygame.CONTROLLER_AXIS_TRIGGERLEFT),
             "right_trigger": trigger(pygame.CONTROLLER_AXIS_TRIGGERRIGHT),
             "dpad_y": dpad_y,
+            "dpad_x": dpad_x,
             "buttons": {
                 "A": bool(c.get_button(pygame.CONTROLLER_BUTTON_A)),
                 "B": bool(c.get_button(pygame.CONTROLLER_BUTTON_B)),

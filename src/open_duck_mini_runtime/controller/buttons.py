@@ -37,6 +37,8 @@ class Buttons:
         self.RB = Button()
         self.dpad_up = Button()
         self.dpad_down = Button()
+        self.dpad_left = Button()
+        self.dpad_right = Button()
         self.START = Button()
         self.BACK = Button()
         self.LStickButton = Button()
@@ -56,6 +58,8 @@ class Buttons:
         back=False,
         LStickButton=False,
         RStickButton=False,
+        dpad_left=False,
+        dpad_right=False,
     ):
         self.A.update(A)
         self.B.update(B)
@@ -65,6 +69,8 @@ class Buttons:
         self.RB.update(RB)
         self.dpad_up.update(dpad_up)
         self.dpad_down.update(dpad_down)
+        self.dpad_left.update(dpad_left)
+        self.dpad_right.update(dpad_right)
         self.START.update(start)
         self.BACK.update(back)
         self.LStickButton.update(LStickButton)

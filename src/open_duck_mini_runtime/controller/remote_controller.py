@@ -116,6 +116,7 @@ class RemoteController:
                 0.0,
                 0.0,
                 0,
+                0,
             )
 
         axes = packet.get("axes", {})
@@ -137,6 +138,7 @@ class RemoteController:
         )
 
         up_down = int(packet.get("dpad_y", 0))
+        left_right = int(packet.get("dpad_x", 0))
 
         return (
             list(self.last_commands),
@@ -153,6 +155,7 @@ class RemoteController:
             left_trigger,
             right_trigger,
             up_down,
+            left_right,
         )
 
     def get_last_command(self):
@@ -167,6 +170,7 @@ class RemoteController:
         LStickButton_pressed = False
         RStickButton_pressed = False
         up_down = 0
+        left_right = 0
         try:
             (
                 self.last_commands,
@@ -183,6 +187,7 @@ class RemoteController:
                 self.last_left_trigger,
                 self.last_right_trigger,
                 up_down,
+                left_right,
             ) = self.cmd_queue.get(
                 False
             )  # non blocking
@@ -202,6 +207,8 @@ class RemoteController:
             back=back_pressed,
             LStickButton=LStickButton_pressed,
             RStickButton=RStickButton_pressed,
+            dpad_left=left_right == -1,
+            dpad_right=left_right == 1,
         )
 
         return (

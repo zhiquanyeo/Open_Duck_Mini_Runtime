@@ -87,6 +87,7 @@ class XBoxController:
                 0.0,
                 0.0,
                 0,
+                0,
             )
 
         last_commands = self.last_commands
@@ -159,7 +160,8 @@ class XBoxController:
                 self.LStickButton_pressed = False
                 self.RStickButton_pressed = False
 
-        up_down = self.p1.get_hat(0)[1] if self.p1.get_numhats() > 0 else 0
+        hat = self.p1.get_hat(0) if self.p1.get_numhats() > 0 else (0, 0)
+        left_right, up_down = hat
         pygame.event.pump()  # process event queue
 
         return (
@@ -177,6 +179,7 @@ class XBoxController:
             left_trigger,
             right_trigger,
             up_down,
+            left_right,
         )
 
     def get_last_command(self):
@@ -191,6 +194,7 @@ class XBoxController:
         LStickButton_pressed = False
         RStickButton_pressed = False
         up_down = 0
+        left_right = 0
         try:
             (
                 self.last_commands,
@@ -207,6 +211,7 @@ class XBoxController:
                 self.last_left_trigger,
                 self.last_right_trigger,
                 up_down,
+                left_right,
             ) = self.cmd_queue.get(
                 False
             )  # non blocking
@@ -226,6 +231,8 @@ class XBoxController:
             back=back_pressed,
             LStickButton=LStickButton_pressed,
             RStickButton=RStickButton_pressed,
+            dpad_left=left_right == -1,
+            dpad_right=left_right == 1,
         )
 
         return (
