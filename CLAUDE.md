@@ -43,7 +43,7 @@ Three-layer design running at 50 Hz:
 
 **Controller layer** (`controller/`): `XBoxController` polls Xbox/DualSense/generic USB gamepad or keyboard at 20 Hz in a background thread. Supports custom axis/button remapping for generic USB controllers via config. `RemoteController` is a drop-in alternative (same `.connected`/`.get_last_command()` interface) sourced from UDP packets instead of a local gamepad — used when `remote_control.enabled` is set in config, for driving the duck from a gamepad plugged into a separate PC/Steam Deck (see `remote_control/` at the repo root, a standalone PC-side package). Both controllers share axis-scaling/range-clamping logic via `command_shaping.py`.
 
-**RL walk layer** (`rl_walk/`): `RLWalk` in `walk.py` is the main orchestrator. `OnnxInfer` wraps the ONNX policy (initialized with `awd=True`). `PolyReferenceMotion` provides a gait phase signal. `LowPassActionFilter` in `rl_utils.py` optionally smooths actions.
+**RL walk layer** (`rl_walk/`): `RLWalk` in `walk.py` is the main orchestrator. `OnnxInfer` wraps the ONNX policy (initialized with `awd=True`). `PolyReferenceMotion` provides a gait phase signal. `LowPassActionFilter` in `rl_utils.py` optionally smooths actions. `stats_server.py`'s `StatsServer` (gated by `web_stats.enabled`) also serves `GET /telemetry` and `GET`/`POST /eye_colors` for the `remote_control` PC tooling — telemetry is read from a cache `get_obs()` refreshes every control tick (never read live from the HTTP handler thread, since the servo bus isn't safe for concurrent access outside the control loop), and eye-color POSTs are a live-only preview via `Eyes.set_color()`, never persisted to `duck_config.json`.
 
 ### Control loop (50 Hz, `walk.py RLWalk.run()`)
 

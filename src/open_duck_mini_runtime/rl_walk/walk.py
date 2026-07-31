@@ -109,6 +109,14 @@ class RLWalk:
         self.paused = self.duck_config.start_paused
         self.motors_enabled = True
 
+        # Latest sensor snapshot, refreshed each control tick in get_obs() and
+        # exposed read-only via get_telemetry() (e.g. to the stats server) —
+        # never read live from a second thread, since the servo bus isn't
+        # safe for concurrent access from outside the control loop.
+        self._telemetry_dof_pos = None
+        self._telemetry_imu_data = None
+        self._telemetry_feet_contacts = None
+
         # Fall detection: calibrate "up" from gravity samples collected while paused
         self._up_vector: np.ndarray | None = None
         self._up_calib_acc = np.zeros(3)
@@ -165,7 +173,11 @@ class RLWalk:
         self.stats_server = None
         if self.duck_config.web_stats_enabled:
             self.stats_server = StatsServer(
-                self.get_stats, port=self.duck_config.web_stats_port
+                self.get_stats,
+                port=self.duck_config.web_stats_port,
+                get_telemetry=self.get_telemetry,
+                get_eye_colors=self.get_eye_colors,
+                set_eye_colors=self.set_eye_color_preview,
             )
 
     @staticmethod
@@ -194,9 +206,71 @@ class RLWalk:
             "control_freq_hz": self.control_freq,
         }
 
+    def get_telemetry(self) -> dict:
+        """Read-only sensor snapshot for the stats server's /telemetry endpoint.
+        Reads the cache get_obs() refreshes every control tick — never touches
+        the servo bus directly, since that's only safe from the control loop."""
+        joint_names = list(self.hwi.joints.keys())
+        dof_pos = self._telemetry_dof_pos
+        imu_data = self._telemetry_imu_data
+
+        return {
+            "timestamp": time.time(),
+            "paused": self.paused,
+            "motors_enabled": self.motors_enabled,
+            "joint_positions": (
+                dict(zip(joint_names, np.round(dof_pos, 4).tolist()))
+                if dof_pos is not None
+                else None
+            ),
+            "motor_targets": dict(
+                zip(joint_names, np.round(np.asarray(self.motor_targets), 4).tolist())
+            ),
+            "imu": (
+                {
+                    "gyro": np.round(imu_data["gyro"], 4).tolist(),
+                    "accel": np.round(imu_data["accelero"], 4).tolist(),
+                    "gravity": np.round(imu_data["gravity"], 4).tolist(),
+                }
+                if imu_data is not None
+                else None
+            ),
+            "feet_contacts": self._telemetry_feet_contacts,
+        }
+
+    def get_eye_colors(self) -> dict:
+        return {
+            "enabled": self.duck_config.eyes,
+            "neopixels": self.duck_config.neopixels,
+            "start": list(self.duck_config.eye_color_start),
+            "paused": list(self.duck_config.eye_color_paused),
+            "off": list(self.duck_config.eye_color_off),
+        }
+
+    def set_eye_color_preview(self, data: dict) -> dict:
+        """Live-only eye color override for the stats server's POST
+        /eye_colors endpoint — lets a PC-side tool try colors on the real
+        hardware. Not persisted to duck_config.json; a restart (or another
+        pause/unpause transition) reverts to the configured colors."""
+        if not self.duck_config.eyes:
+            raise ValueError("eyes expression feature is not enabled in duck_config.json")
+
+        if data.get("clear"):
+            self.eyes.set_solid(False)
+            return {"preview": None}
+
+        color = data.get("color")
+        if not (isinstance(color, list) and len(color) == 3):
+            raise ValueError("expected {'color': [r, g, b]} or {'clear': true}")
+
+        self.eyes.set_solid(True)
+        self.eyes.set_color(self._ec(color))
+        return {"preview": color}
+
     def get_obs(self):
 
         imu_data = self.imu.get_data()
+        self._telemetry_imu_data = imu_data
 
         dof_pos = self.hwi.get_present_positions(
             ignore=[
@@ -212,6 +286,8 @@ class RLWalk:
             ]
         )  # rad/s
 
+        self._telemetry_dof_pos = dof_pos
+
         if dof_pos is None or dof_vel is None:
             return None
 
@@ -226,6 +302,7 @@ class RLWalk:
         cmds = self.last_commands
 
         feet_contacts = self.feet_contacts.get()
+        self._telemetry_feet_contacts = feet_contacts
 
         obs = np.concatenate(
             [

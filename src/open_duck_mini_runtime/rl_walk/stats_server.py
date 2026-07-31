@@ -6,6 +6,10 @@ etc.) plus a small auto-refreshing HTML page, and a POST /shutdown
 endpoint to stop the duck-startup service without needing SSH access.
 Built on the stdlib http.server rather than a web framework — it's a
 handful of read-only fields, and this is a Pi Zero 2W.
+
+Also optionally serves GET /telemetry (joint positions/IMU/foot contacts)
+and GET/POST /eye_colors, for the remote_control PC-side tooling. Both are
+no-ops (404) unless RLWalk passes the corresponding callback in.
 """
 
 import json
@@ -15,7 +19,7 @@ import signal
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -91,22 +95,33 @@ document.getElementById('shutdown').addEventListener('click', async () => {
 
 
 class StatsServer:
-    """Background HTTP server exposing a get_stats() callback as JSON + HTML."""
+    """Background HTTP server exposing a get_stats() callback as JSON + HTML,
+    plus optional telemetry/eye-color callbacks for remote_control tooling."""
 
     def __init__(
         self,
         get_stats: Callable[[], Dict],
         host: str = "0.0.0.0",
         port: int = 8080,
+        get_telemetry: Optional[Callable[[], Dict]] = None,
+        get_eye_colors: Optional[Callable[[], Dict]] = None,
+        set_eye_colors: Optional[Callable[[Dict], Dict]] = None,
     ):
-        handler_cls = self._make_handler(get_stats)
+        handler_cls = self._make_handler(
+            get_stats, get_telemetry, get_eye_colors, set_eye_colors
+        )
         self._httpd = ThreadingHTTPServer((host, port), handler_cls)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._thread.start()
         logger.info("Stats server listening on %s:%d", host, port)
 
     @staticmethod
-    def _make_handler(get_stats: Callable[[], Dict]):
+    def _make_handler(
+        get_stats: Callable[[], Dict],
+        get_telemetry: Optional[Callable[[], Dict]],
+        get_eye_colors: Optional[Callable[[], Dict]],
+        set_eye_colors: Optional[Callable[[Dict], Dict]],
+    ):
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):
                 logger.debug("stats_server: " + fmt, *args)
@@ -118,10 +133,24 @@ class StatsServer:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _send_json(self, status: int, payload) -> None:
+                self._send(status, json.dumps(payload).encode(), "application/json")
+
             def do_GET(self):
                 if self.path == "/stats":
-                    body = json.dumps(get_stats()).encode()
-                    self._send(200, body, "application/json")
+                    self._send_json(200, get_stats())
+                elif self.path == "/telemetry":
+                    if get_telemetry is None:
+                        self._send(404, b"telemetry not available", "text/plain")
+                    else:
+                        self._send_json(200, get_telemetry())
+                elif self.path == "/eye_colors":
+                    if get_eye_colors is None:
+                        self._send(
+                            404, b"eye color control not available", "text/plain"
+                        )
+                    else:
+                        self._send_json(200, get_eye_colors())
                 elif self.path == "/":
                     self._send(200, _PAGE, "text/html")
                 else:
@@ -133,6 +162,20 @@ class StatsServer:
                     # Respond before killing the process this handler is
                     # running in, otherwise the client never sees the 202.
                     threading.Thread(target=_request_shutdown, daemon=True).start()
+                elif self.path == "/eye_colors":
+                    if set_eye_colors is None:
+                        self._send(
+                            404, b"eye color control not available", "text/plain"
+                        )
+                        return
+                    try:
+                        length = int(self.headers.get("Content-Length", 0) or 0)
+                        raw = self.rfile.read(length) if length else b"{}"
+                        data = json.loads(raw) if raw else {}
+                        result = set_eye_colors(data)
+                        self._send_json(200, result)
+                    except Exception as e:
+                        self._send(400, str(e).encode(), "text/plain")
                 else:
                     self._send(404, b"not found", "text/plain")
 

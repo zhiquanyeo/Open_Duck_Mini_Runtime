@@ -235,6 +235,48 @@ client can't push the robot outside its configured physical limits. Notes:
   can reach `port` on its network — only enable this on a network you
   trust.
 
+To test the relay without a robot, run `uv run duck-remote-fake-host` in one
+terminal and `uv run duck-remote --host 127.0.0.1` in another — it decodes
+and pretty-prints packets the same way `RemoteController` would, including
+the mode toggle and disconnect fail-safe.
+
+### Telemetry & Eye Color (from a separate PC)
+
+The same `web_stats` server (see [duck_config.json Reference](#duck_configjson-reference))
+also serves live telemetry and eye-color control once enabled:
+
+```json
+{
+  "web_stats": {
+    "enabled": true,
+    "port": 8080
+  }
+}
+```
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/telemetry` | GET | Joint positions/targets, IMU (gyro/accel/gravity), foot contacts, paused/motors_enabled |
+| `/eye_colors` | GET | Currently configured `eye_colors` (start/paused/off) |
+| `/eye_colors` | POST | `{"color": [r,g,b]}` to preview a color live, or `{"clear": true}` to stop previewing |
+
+The eye-color POST is a **live-only preview** — it calls `Eyes.set_color()`
+directly on the running process and is never written to `duck_config.json`;
+a restart or the next pause/unpause transition reverts to the configured
+colors. `/telemetry` reads a snapshot cached once per control tick rather
+than touching the servo bus directly, since that's only safe from the main
+control loop.
+
+From the PC:
+
+```bash
+cd remote_control
+uv run duck-remote-telemetry --host <duck-ip>        # live dashboard
+uv run duck-remote-eyes --host <duck-ip> --color 255,0,0
+uv run duck-remote-eyes --host <duck-ip> --clear
+uv run duck-remote-eyes --host <duck-ip> --status
+```
+
 ---
 
 ## Hardware Configuration
@@ -376,6 +418,7 @@ src/open_duck_mini_runtime/
 │
 └── rl_walk/                # RL policy and main walk loop
     ├── walk.py             #   RLWalk — main 50 Hz control loop
+    ├── stats_server.py     #   Stats/telemetry/eye-color HTTP server (web_stats)
     ├── onnx_infer.py       #   ONNX model inference wrapper
     ├── poly_reference_motion.py  # Polynomial gait reference
     └── rl_utils.py         #   Action filters, coordinate helpers
@@ -383,7 +426,17 @@ src/open_duck_mini_runtime/
 
 `remote_control/` at the repo root is a separate, standalone package (its
 own `pyproject.toml`) meant to run on a PC/Steam Deck rather than the duck —
-see [Remote Control](#remote-control-gamepad-on-a-separate-pc) above.
+see [Remote Control](#remote-control-gamepad-on-a-separate-pc) above:
+
+```
+remote_control/src/duck_remote/
+├── relay.py             # duck-remote — gamepad → UDP relay to the duck
+├── gamepad_reader.py    #   Local gamepad capture (pygame SDL_GameController)
+├── command_shaping.py   #   Mirrors the duck's axis→command scaling (preview only)
+├── fake_host.py         # duck-remote-fake-host — local test receiver for the relay
+├── eyes_cli.py          # duck-remote-eyes — preview/clear/status eye color
+└── telemetry_cli.py     # duck-remote-telemetry — live joint/IMU dashboard
+```
 
 ---
 
