@@ -83,7 +83,9 @@ async function refresh() {
     const res = await fetch('/stats');
     const data = await res.json();
     document.getElementById('stats').innerHTML = Object.entries(data)
-      .map(([k, v]) => `<tr><td class="key">${k}</td><td>${v}</td></tr>`)
+      .map(([k, v]) => `<tr><td class="key">${k}</td><td>${
+        v !== null && typeof v === 'object' ? JSON.stringify(v) : v
+      }</td></tr>`)
       .join('');
     document.getElementById('err').textContent = '';
   } catch (e) {
