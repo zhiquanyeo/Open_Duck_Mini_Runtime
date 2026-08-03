@@ -49,6 +49,9 @@ class Sounds:
             # sessions without audio hardware, and that value is respected here.
             pygame.mixer.init()
 
+    def set_volume(self, value: float) -> None:
+        self.volume = max(0.0, min(1.0, value))
+
     def play_random_sound(self) -> None:
         if not self.wav_files:
             return

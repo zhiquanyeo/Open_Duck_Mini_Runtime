@@ -32,3 +32,7 @@ IMU_TRIM_DEFAULTS = {"pitch": 0.0, "roll": 0.0}
 # "Reset" target for per-segment LED brightness: full brightness, same as
 # duck_config.py's own led_brightness defaults.
 LED_BRIGHTNESS_DEFAULTS = {"projector": 1.0, "right_eye": 1.0, "left_eye": 1.0}
+
+# "Reset" target for speaker volume: full volume, same as duck_config.py's own
+# speaker_volume default.
+SPEAKER_DEFAULTS = {"volume": 1.0}

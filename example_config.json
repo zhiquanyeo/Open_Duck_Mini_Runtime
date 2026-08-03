@@ -79,6 +79,9 @@
         "left_eye": 1.0
     },
 
+    "speaker_volume": 1.0,
+    "_speaker_volume_comment": "Playback volume (0.0-1.0), applied once at startup via Sounds.set_volume(). Only used when expression_features.speaker=true. Live-tunable/persistable from the /control web UI's Speaker volume panel.",
+
     "_generic_usb_controller_comment": "Optional: override axis/button indices for generic_usb or 8bitdo controller types. Run controller_info.py to identify indices.",
     "generic_usb_controller": {
         "joystick_index": 0,

@@ -175,6 +175,18 @@
 </div>
 
 <div class="panel">
+  <h2>Speaker volume</h2>
+  <div class="field">
+    <label>volume <span class="val" id="v_speaker_volume">—</span></label>
+    <input type="range" id="s_speaker_volume" min="0" max="1" step="0.05">
+  </div>
+  <div class="save-row">
+    <button class="primary" id="volumeSave">Save</button>
+    <button id="volumeReset">Reset</button>
+  </div>
+</div>
+
+<div class="panel">
   <h2>Status</h2>
   <div class="diag" id="diag">—</div>
 </div>
@@ -323,6 +335,16 @@ function updateBrightnessLabels() {
   document.getElementById('v_bright_right_eye').textContent = document.getElementById('s_bright_right_eye').value;
 }
 
+// -------------------------------------------------------------- speaker volume
+let volumeLiveEdit = false;
+document.getElementById('s_speaker_volume').addEventListener('input', (ev) => {
+  volumeLiveEdit = true;
+  post('/api/setting', {group: 'speaker', key: 'volume', value: parseFloat(ev.target.value)});
+  document.getElementById('v_speaker_volume').textContent = ev.target.value;
+});
+document.getElementById('volumeSave').addEventListener('click', () => post('/api/setting', {group: 'speaker', action: 'save'}));
+document.getElementById('volumeReset').addEventListener('click', () => { post('/api/setting', {group: 'speaker', action: 'reset'}); volumeLiveEdit = false; });
+
 // -------------------------------------------------------------- eye color
 let eyesEnabled = false;
 fetch(API + '/eye_colors').then((r) => r.json()).then((d) => {
@@ -375,6 +397,12 @@ async function poll() {
       document.getElementById('s_bright_left_eye').value = br.left_eye ?? 1.0;
       document.getElementById('s_bright_right_eye').value = br.right_eye ?? 1.0;
       updateBrightnessLabels();
+    }
+
+    if (!volumeLiveEdit) {
+      const spk = stats.speaker || {};
+      document.getElementById('s_speaker_volume').value = spk.volume ?? 1.0;
+      document.getElementById('v_speaker_volume').textContent = document.getElementById('s_speaker_volume').value;
     }
 
     const trim = stats.imu_trim || {};

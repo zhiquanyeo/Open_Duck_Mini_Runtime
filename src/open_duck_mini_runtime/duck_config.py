@@ -130,6 +130,11 @@ class DuckConfig:
             "max_motor_velocity_rad_s", 5.24
         )
 
+        # Speaker playback volume (0.0-1.0), applied once at startup via
+        # Sounds.set_volume() in RLWalk.__init__. Only used when
+        # expression_features.speaker=true.
+        self.speaker_volume = self.json_config.get("speaker_volume", 1.0)
+
         # Raw dict — battery.py's DEFAULT_V_MIN/V_MAX/V_FULL fill in anything
         # missing when the estimator is constructed.
         self.battery = self.json_config.get("battery", {})

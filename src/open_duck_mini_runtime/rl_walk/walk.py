@@ -33,6 +33,7 @@ from open_duck_mini_runtime.rl_walk.walk_defaults import (
     WALK_TUNING_DEFAULTS,
     IMU_TRIM_DEFAULTS,
     LED_BRIGHTNESS_DEFAULTS,
+    SPEAKER_DEFAULTS,
 )
 from open_duck_mini_runtime.duck_config import DuckConfig, save_config_fields
 from open_duck_mini_runtime.log import setup_logging, TRACE
@@ -241,6 +242,10 @@ class RLWalk:
         # _apply_led_brightness_settings()/_save_led_brightness_settings()).
         self._led_brightness = dict(self.duck_config.led_brightness)
 
+        # Same pattern for speaker volume — see _apply_speaker_settings() /
+        # _save_speaker_settings() ("speaker" settings group).
+        self._speaker_volume = self.duck_config.speaker_volume
+
         # Optional expression features
         if self.duck_config.eyes:
             self.eyes = Eyes(
@@ -261,7 +266,9 @@ class RLWalk:
             self.projector = Projector(led_counts=self.duck_config.led_counts)
             self.projector.set_brightness(self._led_brightness["projector"])
         if self.duck_config.speaker:
-            self.sounds = Sounds(volume=1.0, sound_directory=ASSETS_ROOT_PATH)
+            self.sounds = Sounds(
+                volume=self._speaker_volume, sound_directory=ASSETS_ROOT_PATH
+            )
         if self.duck_config.antennas:
             self.antennas = Antennas()
 
@@ -311,6 +318,7 @@ class RLWalk:
                 "roll": round(float(self.imu.roll_trim), 5),
             },
             "led_brightness": {k: round(v, 4) for k, v in self._led_brightness.items()},
+            "speaker": {"volume": round(float(self._speaker_volume), 4)},
         }
 
     def get_telemetry(self) -> dict:
@@ -393,6 +401,13 @@ class RLWalk:
             self._reset_led_brightness_settings()
         if "led_brightness" in saves:
             self._save_led_brightness_settings()
+
+        if settings.get("speaker"):
+            self._apply_speaker_settings(settings["speaker"])
+        if "speaker" in resets:
+            self._reset_speaker_settings()
+        if "speaker" in saves:
+            self._save_speaker_settings()
 
         pitch_delta, roll_delta, save_trim = self.control_bus.consume_trim()
         if pitch_delta or roll_delta:
@@ -512,6 +527,31 @@ class RLWalk:
         """Live-reset LED brightness to full (NOT persisted until the next Save)."""
         self._apply_led_brightness_settings(LED_BRIGHTNESS_DEFAULTS)
         logger.info("Reset led_brightness to defaults %s", LED_BRIGHTNESS_DEFAULTS)
+
+    def _apply_speaker_settings(self, d):
+        """Apply live speaker-volume edits. No-op on the hardware if speaker
+        isn't enabled (self.sounds doesn't exist then) — the value is still
+        tracked in _speaker_volume so Save persists it."""
+        if "volume" not in d:
+            return
+        try:
+            value = float(np.clip(float(d["volume"]), 0.0, 1.0))
+        except (ValueError, TypeError):
+            logger.warning("Ignoring bad speaker setting volume=%r", d["volume"])
+            return
+        self._speaker_volume = value
+        if self.duck_config.speaker:
+            self.sounds.set_volume(value)
+
+    def _save_speaker_settings(self):
+        fields = {"speaker_volume": round(float(self._speaker_volume), 4)}
+        backup = save_config_fields(fields, config_json_path=self.duck_config_path)
+        logger.info("Saved speaker_volume %s (backup %s)", fields, backup)
+
+    def _reset_speaker_settings(self):
+        """Live-reset speaker volume to full (NOT persisted until the next Save)."""
+        self._apply_speaker_settings(SPEAKER_DEFAULTS)
+        logger.info("Reset speaker volume to defaults %s", SPEAKER_DEFAULTS)
 
     def _save_imu_trim(self):
         trim = {"pitch": float(self.imu.pitch_trim), "roll": float(self.imu.roll_trim)}

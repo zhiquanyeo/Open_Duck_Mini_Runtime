@@ -158,6 +158,7 @@ cp example_config.json ~/duck_config.json
 | `joints_offsets` | object | all `0.0` | Per-joint offset corrections (radians) |
 | `led_counts.projector` / `.right_eye` / `.left_eye` | int | `1` each | NeoPixel count per strip segment. Only used when `neopixels=true` |
 | `led_brightness.projector` / `.right_eye` / `.left_eye` | float | `1.0` each | Per-segment brightness (0.0-1.0), applied once at startup. Only used when `neopixels=true` |
+| `speaker_volume` | float | `1.0` | Playback volume (0.0-1.0), applied once at startup. Only used when `expression_features.speaker=true` |
 | `imu_trim.pitch` / `.roll` | float | `0.0` | Residual IMU mounting-tilt correction (radians) — live-tunable from `/control` |
 | `stability_governor.enabled` | bool | `false` | Ease drive commands when tipping, upstream of fall detection — see [Web Control UI](#web-control-ui-phone-browser-no-pc-app-needed) |
 | `action_scale` | float | `0.25` | Policy residual scale — live-tunable from `/control` |
@@ -294,8 +295,8 @@ With `web_stats.enabled` set, the same server also serves a touch-control page
 at `http://<duck-ip>:<port>/control` — joystick + A/B/X/Y/LB/RB/dpad, pause/
 resume, live IMU-trim nudging, live walk-tuning (action_scale, gait offset,
 stability governor), live per-segment LED brightness (projector/left eye/
-right eye), eye color, and a battery gauge. No install needed — just open the
-URL on a phone or any browser on the same network.
+right eye), speaker volume, eye color, and a battery gauge. No install
+needed — just open the URL on a phone or any browser on the same network.
 
 It's backed by `ControlBus` (`rl_walk/control_bus.py`), a third, independent
 way to drive `RLWalk` alongside `XBoxController`/`RemoteController` — the web
@@ -308,7 +309,7 @@ same edge-detector, and triggers are the max of both sources. `/api/*` routes:
 | `/api/command` | POST | `{"active": bool, "l_x", "l_y", "r_x", "r_y", "left_trigger", "right_trigger"}` — virtual sticks |
 | `/api/button` | POST | `{"button": "A", "action": "press"\|"down"\|"up"}` — `A B X Y LB RB dpad_up dpad_down dpad_left dpad_right` |
 | `/api/trim` | POST | `{"axis": "pitch"\|"roll", "delta": 0.002}` to nudge, or `{"action": "save"}` to persist |
-| `/api/setting` | POST | `{"group": "walk"\|"led_brightness", "key": ..., "value": ...}` to edit live, or `{"group": ..., "action": "save"\|"reset"}` |
+| `/api/setting` | POST | `{"group": "walk"\|"led_brightness"\|"speaker", "key": ..., "value": ...}` to edit live, or `{"group": ..., "action": "save"\|"reset"}` |
 
 **IMU trim** (`imu_trim` in `duck_config.json`) corrects small residual mounting
 tilt the BNO055 axis-remap can't — a rotation applied to accel/gyro/gravity in
@@ -323,9 +324,11 @@ a replacement; fall detection's pause+motors-off safety net is unchanged.
 enforcement isn't implemented yet, so toggling it doesn't currently change
 motor behavior. **LED brightness** (`led_brightness` — `projector`/`left_eye`/
 `right_eye`, same shape as `led_counts`) is its own settings group, applied
-live to `Eyes`/`Projector` and saved/reset independently of walk tuning; a
-segment whose feature isn't enabled just doesn't visibly change (the value is
-still tracked and persists on Save). The battery gauge is read via `HWI.read_battery_handoff()` —
+live to `Eyes`/`Projector` and saved/reset independently of walk tuning.
+**Speaker volume** (`speaker_volume`, key `"volume"` in the `"speaker"` group)
+works the same way, applied via `Sounds.set_volume()`. In both cases, a
+feature that isn't enabled just doesn't audibly/visibly change — the value is
+still tracked and persists on Save. The battery gauge is read via `HWI.read_battery_handoff()` —
 `rustypot` 0.1.0 doesn't expose voltage/temperature registers, so this briefly
 releases the servo connection, reads through `pypot` instead, then always
 reconnects `rustypot` before returning (paused-only, throttled to a few
