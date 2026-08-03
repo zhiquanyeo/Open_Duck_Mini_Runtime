@@ -11,6 +11,7 @@ from open_duck_mini_runtime.hardware.feet_contacts import FeetContacts
 from open_duck_mini_runtime.controller.xbox_controller import XBoxController
 from open_duck_mini_runtime.controller.remote_controller import RemoteController
 from open_duck_mini_runtime.controller.command_shaping import shape_commands
+from open_duck_mini_runtime.controller.buttons import Buttons
 from open_duck_mini_runtime.hardware.eyes import Eyes
 from open_duck_mini_runtime.hardware.sounds import Sounds
 from open_duck_mini_runtime.hardware.antennas import Antennas
@@ -55,6 +56,14 @@ TRIM_LIMIT = 0.1  # rad (~5.7 deg) max |trim| on either axis
 
 # How often (s) to sample the battery — throttled and paused-only, see run().
 BATTERY_SAMPLE_PERIOD_S = 5.0
+
+# Buttons ControlBus (the web control UI) can supply — matches ControlBus.BUTTONS.
+# start/back/LStickButton/RStickButton aren't in this set since ControlBus has no
+# equivalent web control for them; the pad's own state for those passes through
+# untouched.
+_CONTROL_BUS_MERGE_BUTTONS = (
+    "A", "B", "X", "Y", "LB", "RB", "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+)
 
 
 class RLWalk:
@@ -175,6 +184,20 @@ class RLWalk:
         self.control_bus = (
             ControlBus() if self.duck_config.web_stats_enabled else None
         )
+        # Independent edge-detector state for web-sourced button presses —
+        # deliberately a SEPARATE Buttons() instance rather than calling
+        # self.buttons.update() a second time per tick: Button.update() is a
+        # stateful edge-detector meant for exactly one call per tick, and
+        # calling it twice on the same object (once from the pad, once for
+        # the web merge) makes the second call see "still held from before"
+        # and immediately clear .triggered right after the first call set it
+        # — which silently broke every tap-triggered action (pause/resume,
+        # sound, projector, gait-offset nudges) whenever web_stats was
+        # enabled, whether or not the web UI was actually in use. Each
+        # instance gets exactly one update() call; results are OR'd together
+        # as plain attribute writes afterward, which doesn't touch either
+        # object's internal debounce state.
+        self._control_bus_buttons = Buttons()
         self._prev_control_bus_Y = False
 
         # Battery: throttled, paused-only sampling via HWI.read_battery_handoff()
@@ -671,28 +694,31 @@ class RLWalk:
                             )
                         self._prev_control_bus_Y = cb_Y
 
-                        # OR web buttons into the pad's current state and feed
-                        # the SAME Buttons edge-detector, so .triggered/.is_pressed
-                        # work identically regardless of which source acted.
-                        self.buttons.update(
-                            self.buttons.A.is_pressed or cb_buttons["A"],
-                            self.buttons.B.is_pressed or cb_buttons["B"],
-                            self.buttons.X.is_pressed or cb_buttons["X"],
-                            self.buttons.Y.is_pressed or cb_Y,
-                            self.buttons.LB.is_pressed or cb_buttons["LB"],
-                            self.buttons.RB.is_pressed or cb_buttons["RB"],
-                            self.buttons.dpad_up.is_pressed or cb_buttons["dpad_up"],
-                            self.buttons.dpad_down.is_pressed
-                            or cb_buttons["dpad_down"],
-                            start=self.buttons.START.is_pressed,
-                            back=self.buttons.BACK.is_pressed,
-                            LStickButton=self.buttons.LStickButton.is_pressed,
-                            RStickButton=self.buttons.RStickButton.is_pressed,
-                            dpad_left=self.buttons.dpad_left.is_pressed
-                            or cb_buttons["dpad_left"],
-                            dpad_right=self.buttons.dpad_right.is_pressed
-                            or cb_buttons["dpad_right"],
+                        # Feed the web buttons through their OWN edge-detector
+                        # (exactly one update() call, same as the pad's
+                        # self.buttons above) — see _control_bus_buttons'
+                        # definition in __init__ for why this can't be a
+                        # second update() call on self.buttons itself.
+                        self._control_bus_buttons.update(
+                            cb_buttons["A"],
+                            cb_buttons["B"],
+                            cb_buttons["X"],
+                            cb_Y,
+                            cb_buttons["LB"],
+                            cb_buttons["RB"],
+                            cb_buttons["dpad_up"],
+                            cb_buttons["dpad_down"],
+                            dpad_left=cb_buttons["dpad_left"],
+                            dpad_right=cb_buttons["dpad_right"],
                         )
+                        # OR the two independently-computed results together —
+                        # plain attribute writes, not another update() call, so
+                        # neither tracker's debounce state is disturbed.
+                        for name in _CONTROL_BUS_MERGE_BUTTONS:
+                            pad_btn = getattr(self.buttons, name)
+                            web_btn = getattr(self._control_bus_buttons, name)
+                            pad_btn.is_pressed = pad_btn.is_pressed or web_btn.is_pressed
+                            pad_btn.triggered = pad_btn.triggered or web_btn.triggered
 
                         self._consume_control_bus_settings()
 
