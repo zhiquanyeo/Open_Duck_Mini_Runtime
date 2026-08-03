@@ -1,0 +1,356 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Open Duck Mini — Control</title>
+<style>
+  :root {
+    --bg: #16130f; --panel: #201b15; --border: #3a3226;
+    --text: #f0e6d2; --muted: #a89a80; --accent: #ffb347;
+    --accent-dim: #7a5a24; --danger: #f28b82; --ok: #8ce08a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    padding: 0.75rem; padding-bottom: 2rem; user-select: none;
+  }
+  h1 { font-size: 1.1rem; margin: 0.25rem 0 0.75rem; color: var(--accent); }
+  h2 { font-size: 0.85rem; margin: 0 0 0.5rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.75rem; margin-bottom: 0.75rem;
+  }
+  .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .pill {
+    display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+    background: var(--accent-dim); color: var(--accent); font-size: 0.8rem; font-weight: 600;
+  }
+  .pill.warn { background: #5c1a1a; color: var(--danger); }
+  .pill.good { background: #1a4a1a; color: var(--ok); }
+  #conn { font-size: 0.75rem; color: var(--muted); }
+  #conn.bad { color: var(--danger); }
+  button {
+    font-family: inherit; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem;
+    font-size: 0.85rem; cursor: pointer;
+  }
+  button:active, button.held { background: var(--accent-dim); border-color: var(--accent); }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .sticks { display: flex; justify-content: space-between; gap: 1rem; margin: 0.5rem 0; }
+  .stick {
+    position: relative; width: 42vw; height: 42vw; max-width: 170px; max-height: 170px;
+    background: #0f0d0a; border: 1px solid var(--border); border-radius: 50%; touch-action: none;
+  }
+  .knob {
+    position: absolute; width: 34%; height: 34%; left: 33%; top: 33%;
+    background: var(--accent-dim); border: 2px solid var(--accent); border-radius: 50%;
+    pointer-events: none;
+  }
+  .buttons-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin-top: 0.5rem; }
+  .buttons-grid button { padding: 0.7rem 0.3rem; }
+  .trigger-row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.5rem; }
+  .trigger-row label { font-size: 0.75rem; color: var(--muted); width: 4rem; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  .field { margin-bottom: 0.6rem; }
+  .field label { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.2rem; }
+  .field .val { color: var(--text); font-variant-numeric: tabular-nums; }
+  .checkline { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .diag { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+  .save-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+  #eyeColorPanel { display: none; }
+</style>
+</head>
+<body>
+
+<h1>🦆 Open Duck Mini</h1>
+
+<div class="panel row">
+  <span class="pill" id="modePill">—</span>
+  <span class="pill" id="pausedPill">—</span>
+  <span class="pill" id="padPill">—</span>
+  <span id="conn">connecting…</span>
+</div>
+
+<div class="panel">
+  <h2>Drive</h2>
+  <div class="sticks">
+    <div class="stick" id="stickL"><div class="knob"></div></div>
+    <div class="stick" id="stickR"><div class="knob"></div></div>
+  </div>
+  <div class="trigger-row">
+    <label>L trig</label><input type="range" id="trigL" min="0" max="1" step="0.05" value="0">
+  </div>
+  <div class="trigger-row">
+    <label>R trig</label><input type="range" id="trigR" min="0" max="1" step="0.05" value="0">
+  </div>
+  <div class="buttons-grid">
+    <button data-btn="A">A pause</button>
+    <button data-btn="B">B sound</button>
+    <button data-btn="X">X light</button>
+    <button data-btn="Y">Y head-mode</button>
+    <button data-btn="LB" data-hold="1">LB sprint</button>
+    <button data-btn="RB">RB</button>
+    <button data-btn="dpad_up">▲ gait+</button>
+    <button data-btn="dpad_down">▼ gait-</button>
+  </div>
+</div>
+
+<div class="panel" id="eyeColorPanel">
+  <h2>Eye color (live preview)</h2>
+  <div class="row">
+    <input type="color" id="eyeColor" value="#ffffff">
+    <button class="primary" id="eyeApply">Apply</button>
+    <button id="eyeClear">Clear</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>IMU trim</h2>
+  <div class="row" style="margin-bottom:0.5rem;">
+    <span style="width:3.5rem;color:var(--muted);font-size:0.8rem;">pitch</span>
+    <button data-trim="pitch" data-delta="-0.002">−</button>
+    <button data-trim="pitch" data-delta="0.002">+</button>
+    <span style="width:3.5rem;color:var(--muted);font-size:0.8rem;">roll</span>
+    <button data-trim="roll" data-delta="-0.002">−</button>
+    <button data-trim="roll" data-delta="0.002">+</button>
+  </div>
+  <div class="save-row">
+    <button class="primary" id="trimSave">Save</button>
+    <button id="trimReset">Reset</button>
+  </div>
+  <div class="diag" id="diagTrim" style="margin-top:0.4rem;">—</div>
+</div>
+
+<div class="panel">
+  <h2>Walk tuning</h2>
+  <div class="field">
+    <label>action_scale <span class="val" id="v_action_scale">—</span></label>
+    <input type="range" id="s_action_scale" min="0" max="0.6" step="0.01">
+  </div>
+  <div class="field">
+    <label>gait offset <span class="val" id="v_gait_offset">—</span></label>
+    <input type="range" id="s_gait_offset" min="-0.5" max="0.5" step="0.01">
+  </div>
+  <div class="field">
+    <label>max motor vel (rad/s) <span class="val" id="v_max_vel">—</span></label>
+    <input type="range" id="s_max_vel" min="0.5" max="12" step="0.1">
+  </div>
+  <div class="checkline"><input type="checkbox" id="c_velocity_clip"> velocity_clip (persisted; enforcement not active yet)</div>
+  <div class="checkline"><input type="checkbox" id="c_gov_enabled"> stability governor enabled</div>
+  <div class="field">
+    <label>governor tilt lo/hi (deg) <span class="val" id="v_gov_tilt">—</span></label>
+    <input type="range" id="s_gov_tilt_lo" min="0" max="45" step="1">
+    <input type="range" id="s_gov_tilt_hi" min="0" max="60" step="1">
+  </div>
+  <div class="field">
+    <label>governor floor <span class="val" id="v_gov_floor">—</span></label>
+    <input type="range" id="s_gov_floor" min="0" max="1" step="0.05">
+  </div>
+  <div class="save-row">
+    <button class="primary" id="walkSave">Save</button>
+    <button id="walkReset">Reset</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Status</h2>
+  <div class="diag" id="diag">—</div>
+</div>
+
+<script>
+const API = '';
+let stale = false;
+
+function post(path, body) {
+  return fetch(API + path, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {}),
+  }).catch(() => {});
+}
+
+// ---------------------------------------------------------------- sticks
+function makeStick(el, onMove, onRelease) {
+  const knob = el.querySelector('.knob');
+  let active = false, id = null;
+  function setKnob(x, y) {
+    knob.style.left = (33 + x * 25) + '%';
+    knob.style.top = (33 - y * 25) + '%';
+  }
+  function toXY(ev) {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let x = (ev.clientX - cx) / (r.width / 2);
+    let y = -(ev.clientY - cy) / (r.height / 2);
+    const mag = Math.hypot(x, y);
+    if (mag > 1) { x /= mag; y /= mag; }
+    return [x, y];
+  }
+  el.addEventListener('pointerdown', (ev) => {
+    active = true; id = ev.pointerId; el.setPointerCapture(id);
+    const [x, y] = toXY(ev); setKnob(x, y); onMove(x, y);
+  });
+  el.addEventListener('pointermove', (ev) => {
+    if (!active || ev.pointerId !== id) return;
+    const [x, y] = toXY(ev); setKnob(x, y); onMove(x, y);
+  });
+  function release(ev) {
+    if (!active || ev.pointerId !== id) return;
+    active = false; setKnob(0, 0); onRelease();
+  }
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+}
+
+let leftActive = false, lx = 0, ly = 0, rx = 0;
+makeStick(document.getElementById('stickL'), (x, y) => {
+  leftActive = true; lx = x; ly = y; sendCommand();
+}, () => { leftActive = false; lx = 0; ly = 0; sendCommand(); });
+makeStick(document.getElementById('stickR'), (x, y) => {
+  leftActive = true; rx = x; sendCommand();
+}, () => { rx = 0; sendCommand(); });
+
+const trigL = document.getElementById('trigL');
+const trigR = document.getElementById('trigR');
+trigL.addEventListener('input', sendCommand);
+trigR.addEventListener('input', sendCommand);
+
+let sendTimer = null;
+function sendCommand() {
+  post('/api/command', {
+    active: leftActive, l_x: lx, l_y: ly, r_x: rx, r_y: 0,
+    left_trigger: parseFloat(trigL.value), right_trigger: parseFloat(trigR.value),
+  });
+  clearTimeout(sendTimer);
+  // Keep the override alive at ~10 Hz while a stick is actually held so it
+  // doesn't go stale mid-drag; release handlers above send the final active:false.
+  if (leftActive) sendTimer = setTimeout(sendCommand, 100);
+}
+
+// ---------------------------------------------------------------- buttons
+document.querySelectorAll('[data-btn]').forEach((btn) => {
+  const name = btn.dataset.btn;
+  if (btn.dataset.hold) {
+    btn.addEventListener('pointerdown', () => { btn.classList.add('held'); post('/api/button', {button: name, action: 'down'}); });
+    const up = () => { btn.classList.remove('held'); post('/api/button', {button: name, action: 'up'}); };
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+  } else {
+    btn.addEventListener('click', () => post('/api/button', {button: name, action: 'press'}));
+  }
+});
+
+// ------------------------------------------------------------------ trim
+document.querySelectorAll('[data-trim]').forEach((btn) => {
+  btn.addEventListener('click', () => post('/api/trim', {
+    axis: btn.dataset.trim, delta: parseFloat(btn.dataset.delta),
+  }));
+});
+document.getElementById('trimSave').addEventListener('click', () => post('/api/trim', {action: 'save'}));
+document.getElementById('trimReset').addEventListener('click', () => post('/api/setting', {group: 'imu_trim', action: 'reset'}));
+
+// ------------------------------------------------------------ walk tuning
+const walkFields = {
+  action_scale: 's_action_scale', phase_frequency_factor_offset: 's_gait_offset',
+  max_motor_velocity_rad_s: 's_max_vel', governor_tilt_lo_deg: 's_gov_tilt_lo',
+  governor_tilt_hi_deg: 's_gov_tilt_hi', governor_floor: 's_gov_floor',
+};
+let liveEdit = false;
+Object.entries(walkFields).forEach(([key, id]) => {
+  document.getElementById(id).addEventListener('input', (ev) => {
+    liveEdit = true;
+    post('/api/setting', {group: 'walk', key, value: parseFloat(ev.target.value)});
+    updateWalkLabels();
+  });
+});
+document.getElementById('c_velocity_clip').addEventListener('change', (ev) => {
+  post('/api/setting', {group: 'walk', key: 'velocity_clip', value: ev.target.checked});
+});
+document.getElementById('c_gov_enabled').addEventListener('change', (ev) => {
+  post('/api/setting', {group: 'walk', key: 'governor_enabled', value: ev.target.checked});
+});
+document.getElementById('walkSave').addEventListener('click', () => post('/api/setting', {group: 'walk', action: 'save'}));
+document.getElementById('walkReset').addEventListener('click', () => { post('/api/setting', {group: 'walk', action: 'reset'}); liveEdit = false; });
+
+function updateWalkLabels() {
+  document.getElementById('v_action_scale').textContent = document.getElementById('s_action_scale').value;
+  document.getElementById('v_gait_offset').textContent = document.getElementById('s_gait_offset').value;
+  document.getElementById('v_max_vel').textContent = document.getElementById('s_max_vel').value;
+  document.getElementById('v_gov_tilt').textContent =
+    document.getElementById('s_gov_tilt_lo').value + ' / ' + document.getElementById('s_gov_tilt_hi').value;
+  document.getElementById('v_gov_floor').textContent = document.getElementById('s_gov_floor').value;
+}
+
+// -------------------------------------------------------------- eye color
+let eyesEnabled = false;
+fetch(API + '/eye_colors').then((r) => r.json()).then((d) => {
+  eyesEnabled = !!d.enabled;
+  document.getElementById('eyeColorPanel').style.display = eyesEnabled ? 'block' : 'none';
+}).catch(() => {});
+document.getElementById('eyeApply').addEventListener('click', () => {
+  const hex = document.getElementById('eyeColor').value;
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  post('/eye_colors', {color: [r, g, b]});
+});
+document.getElementById('eyeClear').addEventListener('click', () => post('/eye_colors', {clear: true}));
+
+// ------------------------------------------------------------------- poll
+async function poll() {
+  try {
+    const [stats, telemetry] = await Promise.all([
+      fetch(API + '/stats').then((r) => r.json()),
+      fetch(API + '/telemetry').then((r) => r.json()),
+    ]);
+    stale = false;
+    document.getElementById('conn').textContent = 'connected';
+    document.getElementById('conn').classList.remove('bad');
+
+    document.getElementById('modePill').textContent = stats.mode || '—';
+    const pausedPill = document.getElementById('pausedPill');
+    pausedPill.textContent = stats.paused ? 'PAUSED' : (stats.motors_enabled ? 'WALKING' : 'MOTORS OFF');
+    pausedPill.className = 'pill ' + (stats.paused || !stats.motors_enabled ? 'warn' : 'good');
+    const padPill = document.getElementById('padPill');
+    padPill.textContent = stats.gamepad_connected ? 'pad: connected' : 'pad: none';
+    padPill.className = 'pill ' + (stats.gamepad_connected ? 'good' : '');
+
+    if (!liveEdit) {
+      const wt = stats.walk_tuning || {};
+      const gov = stats.stability_governor || {};
+      document.getElementById('s_gait_offset').value = stats.phase_frequency_factor_offset;
+      document.getElementById('s_action_scale').value = wt.action_scale ?? 0.25;
+      document.getElementById('s_max_vel').value = wt.max_motor_velocity_rad_s ?? 5.24;
+      document.getElementById('c_velocity_clip').checked = !!wt.velocity_clip;
+      document.getElementById('c_gov_enabled').checked = !!gov.enabled;
+      document.getElementById('s_gov_tilt_lo').value = gov.tilt_lo_deg ?? 10;
+      document.getElementById('s_gov_tilt_hi').value = gov.tilt_hi_deg ?? 25;
+      document.getElementById('s_gov_floor').value = gov.floor ?? 0.35;
+      updateWalkLabels();
+    }
+
+    const trim = stats.imu_trim || {};
+    document.getElementById('diagTrim').textContent =
+      `pitch ${(trim.pitch ?? 0).toFixed(4)} rad, roll ${(trim.roll ?? 0).toFixed(4)} rad`;
+
+    const bat = telemetry.battery || {};
+    const battStr = bat.voltage != null
+      ? `${bat.voltage.toFixed(2)}V (${bat.percent ?? '?'}%)${bat.charging ? ' ⚡' : ''}`
+      : 'N/A';
+    const imu = telemetry.imu || {};
+    document.getElementById('diag').innerHTML =
+      `battery: ${battStr}<br>` +
+      `gait: ${stats.gait_frequency_hz ?? '—'} Hz<br>` +
+      `gyro: ${(imu.gyro || []).map((v) => v.toFixed(2)).join(', ')}<br>` +
+      `feet: ${(telemetry.feet_contacts || []).join(', ')}`;
+  } catch (e) {
+    stale = true;
+    document.getElementById('conn').textContent = 'reconnecting…';
+    document.getElementById('conn').classList.add('bad');
+  }
+}
+
+poll();
+setInterval(poll, 500);
+</script>
+</body>
+</html>

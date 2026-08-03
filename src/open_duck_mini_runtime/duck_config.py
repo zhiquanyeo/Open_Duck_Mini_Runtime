@@ -1,5 +1,7 @@
 import json
 import logging
+import shutil
+import time
 from typing import Optional
 import os
 
@@ -8,6 +10,29 @@ logger = logging.getLogger(__name__)
 HOME_DIR = os.path.expanduser("~")
 
 LED_ORDER: str = os.getenv("ODUCK_LED_ORDER", "GRB").upper()
+
+
+def save_config_fields(
+    updates: dict, config_json_path: str = f"{HOME_DIR}/duck_config.json", backup=True
+):
+    """Merge `updates` (a dict of top-level keys) into the config file, preserving
+    every OTHER field, and write it back. Backs the file up first (timestamped) so
+    a bad write is always recoverable. Returns the backup path (or None if there
+    was no existing file). Used by the web control UI to persist live IMU-trim /
+    walk-tuning edits without disturbing the rest of duck_config.json."""
+    try:
+        cfg = json.load(open(config_json_path, "r"))
+    except FileNotFoundError:
+        cfg = {}
+    backup_path = None
+    if backup and os.path.exists(config_json_path):
+        backup_path = f"{config_json_path}.{time.strftime('%Y%m%d-%H%M%S')}.bak"
+        shutil.copy2(config_json_path, backup_path)
+    cfg.update(updates)
+    with open(config_json_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    return backup_path
 
 
 class DuckConfig:
@@ -84,6 +109,30 @@ class DuckConfig:
         remote_control = self.json_config.get("remote_control", {})
         self.remote_control_enabled = remote_control.get("enabled", False)
         self.remote_control_port = remote_control.get("port", 10000)
+
+        imu_trim = self.json_config.get("imu_trim", {})
+        self.imu_trim = {
+            "pitch": imu_trim.get("pitch", 0.0),
+            "roll": imu_trim.get("roll", 0.0),
+        }
+
+        # Raw dict — governor_from_config() (rl_walk/stability_governor.py) fills
+        # in safe defaults for any missing keys. Ships disabled (pure pass-through)
+        # regardless of what's in the config unless explicitly set true.
+        self.stability_governor = self.json_config.get("stability_governor", {})
+
+        # Optional live-tunable walk settings; fall back to the code defaults used
+        # elsewhere (RLWalk.__init__'s action_scale arg, the hardcoded
+        # max_motor_velocity) when absent from config.
+        self.action_scale = self.json_config.get("action_scale", None)
+        self.velocity_clip = self.json_config.get("velocity_clip", False)
+        self.max_motor_velocity_rad_s = self.json_config.get(
+            "max_motor_velocity_rad_s", 5.24
+        )
+
+        # Raw dict — battery.py's DEFAULT_V_MIN/V_MAX/V_FULL fill in anything
+        # missing when the estimator is constructed.
+        self.battery = self.json_config.get("battery", {})
 
         self.led_order = self.json_config.get("led_order", "GRBW")
 

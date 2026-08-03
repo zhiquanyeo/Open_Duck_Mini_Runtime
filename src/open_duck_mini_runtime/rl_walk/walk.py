@@ -10,6 +10,7 @@ from open_duck_mini_runtime.rl_walk.poly_reference_motion import PolyReferenceMo
 from open_duck_mini_runtime.hardware.feet_contacts import FeetContacts
 from open_duck_mini_runtime.controller.xbox_controller import XBoxController
 from open_duck_mini_runtime.controller.remote_controller import RemoteController
+from open_duck_mini_runtime.controller.command_shaping import shape_commands
 from open_duck_mini_runtime.hardware.eyes import Eyes
 from open_duck_mini_runtime.hardware.sounds import Sounds
 from open_duck_mini_runtime.hardware.antennas import Antennas
@@ -19,7 +20,19 @@ from open_duck_mini_runtime.rl_walk.rl_utils import (
     LowPassActionFilter,
 )
 from open_duck_mini_runtime.rl_walk.stats_server import StatsServer
-from open_duck_mini_runtime.duck_config import DuckConfig
+from open_duck_mini_runtime.rl_walk.control_bus import ControlBus
+from open_duck_mini_runtime.rl_walk.stability_governor import (
+    governor_from_config,
+    tilt_angle_deg,
+    tilt_rate,
+    accel_pitch_roll,
+)
+from open_duck_mini_runtime.rl_walk.battery import ChargeEstimator, estimate_percent
+from open_duck_mini_runtime.rl_walk.walk_defaults import (
+    WALK_TUNING_DEFAULTS,
+    IMU_TRIM_DEFAULTS,
+)
+from open_duck_mini_runtime.duck_config import DuckConfig, save_config_fields
 from open_duck_mini_runtime.log import setup_logging, TRACE
 
 import os
@@ -31,6 +44,17 @@ logger = logging.getLogger(__name__)
 
 HOME_DIR = os.path.expanduser("~")
 ASSETS_ROOT_PATH: str = str(Path(__file__).parent.parent / "assets")
+
+# action_scale is ramped toward a web-set target so a live change can't step the
+# leg amplitude in one tick (motor safety). Max change per control tick:
+ACTION_SCALE_RAMP = 0.02
+
+# Live IMU-trim tuner (web control UI): hard clamp so a stuck input can't drive
+# the trim to a dangerous angle.
+TRIM_LIMIT = 0.1  # rad (~5.7 deg) max |trim| on either axis
+
+# How often (s) to sample the battery — throttled and paused-only, see run().
+BATTERY_SAMPLE_PERIOD_S = 5.0
 
 
 class RLWalk:
@@ -50,6 +74,7 @@ class RLWalk:
         head_only=False,
     ):
 
+        self.duck_config_path = duck_config_path
         self.duck_config = DuckConfig(config_json_path=duck_config_path)
 
         self.commands = commands
@@ -60,7 +85,11 @@ class RLWalk:
         self.policy = OnnxInfer(self.onnx_model_path, awd=True)
 
         self.num_dofs = 14
-        self.max_motor_velocity = 5.24  # rad/s
+        # Live-tunable via the web control UI; velocity_clip is exposed/persisted
+        # for parity but not enforced yet (see max_motor_velocity's only other use
+        # in run(), which stays commented out — a separate follow-up).
+        self.max_motor_velocity = self.duck_config.max_motor_velocity_rad_s  # rad/s
+        self.velocity_clip = self.duck_config.velocity_clip
 
         # Control
         self.control_freq = control_freq
@@ -88,12 +117,21 @@ class RLWalk:
             sampling_freq=int(self.control_freq),
             user_pitch_bias=self.pitch_bias,
             upside_down=self.duck_config.imu_upside_down,
+            pitch_trim=self.duck_config.imu_trim["pitch"],
+            roll_trim=self.duck_config.imu_trim["roll"],
         )
 
         self.feet_contacts = FeetContacts()
 
-        # Scales
-        self.action_scale = action_scale
+        # Scales — config overrides the CLI default when explicitly set.
+        # action_scale ramps toward _action_scale_target (see run()) so a live
+        # web-tuning edit can't step the leg amplitude in one tick.
+        self.action_scale = (
+            self.duck_config.action_scale
+            if self.duck_config.action_scale is not None
+            else action_scale
+        )
+        self._action_scale_target = self.action_scale
 
         self.last_action = np.zeros(self.num_dofs)
         self.last_last_action = np.zeros(self.num_dofs)
@@ -124,6 +162,30 @@ class RLWalk:
         self._up_calib_target = 10  # 10 samples × 0.1 s pause loop = ~1 s
         self._fall_consecutive = 0
         self._fall_consecutive_required = 3  # frames at 50 Hz before triggering
+
+        # Stability governor: an additional, independent, disabled-by-default
+        # layer that eases drive commands when tipping — sits strictly upstream
+        # of fall detection above, which is untouched and still the safety net
+        # that pauses + turns off motors.
+        self.governor = governor_from_config(self.duck_config.stability_governor)
+
+        # Web control UI (phone browser, no PC app needed) — an alternate input
+        # source merged into the gamepad/remote-controller command each tick in
+        # run(), only constructed when the stats server is actually serving it.
+        self.control_bus = (
+            ControlBus() if self.duck_config.web_stats_enabled else None
+        )
+        self._prev_control_bus_Y = False
+
+        # Battery: throttled, paused-only sampling via HWI.read_battery_handoff()
+        # — see run()'s paused branch and _sample_battery(). estimate_percent/
+        # ChargeEstimator both handle a None voltage (bus read failure) gracefully.
+        battery_kwargs = {}
+        if "v_full" in self.duck_config.battery:
+            battery_kwargs["v_full"] = self.duck_config.battery["v_full"]
+        self._battery_estimator = ChargeEstimator(**battery_kwargs)
+        self._telemetry_battery = {"voltage": None, "percent": None, "charging": None}
+        self._battery_last_sample_t = 0.0
 
         self.command_freq = 20  # hz
         if self.commands:
@@ -178,6 +240,7 @@ class RLWalk:
                 get_telemetry=self.get_telemetry,
                 get_eye_colors=self.get_eye_colors,
                 set_eye_colors=self.set_eye_color_preview,
+                control_bus=self.control_bus,
             )
 
     @staticmethod
@@ -204,6 +267,16 @@ class RLWalk:
             "resultant_frequency_factor": round(resultant_factor, 3),
             "gait_frequency_hz": round(gait_hz, 3),
             "control_freq_hz": self.control_freq,
+            "walk_tuning": {
+                "action_scale": round(float(self._action_scale_target), 4),
+                "velocity_clip": bool(self.velocity_clip),
+                "max_motor_velocity_rad_s": round(float(self.max_motor_velocity), 3),
+            },
+            "stability_governor": self._governor_config_dict(),
+            "imu_trim": {
+                "pitch": round(float(self.imu.pitch_trim), 5),
+                "roll": round(float(self.imu.roll_trim), 5),
+            },
         }
 
     def get_telemetry(self) -> dict:
@@ -236,6 +309,7 @@ class RLWalk:
                 else None
             ),
             "feet_contacts": self._telemetry_feet_contacts,
+            "battery": self._telemetry_battery,
         }
 
     def get_eye_colors(self) -> dict:
@@ -266,6 +340,119 @@ class RLWalk:
         self.eyes.set_solid(True)
         self.eyes.set_color(self._ec(color))
         return {"preview": color}
+
+    def _consume_control_bus_settings(self):
+        """Drain and apply the web control UI's live-settings edits + save/reset
+        requests. Cheap: one lock, then plain attribute writes (no hardware in the
+        hot path)."""
+        settings, saves, resets = self.control_bus.consume_settings()
+        if settings.get("walk"):
+            self._apply_walk_settings(settings["walk"])
+        if "walk" in resets:
+            self._reset_walk_settings()
+        if "walk" in saves:
+            self._save_walk_settings()
+
+        pitch_delta, roll_delta, save_trim = self.control_bus.consume_trim()
+        if pitch_delta or roll_delta:
+            self.imu.pitch_trim = float(
+                np.clip(self.imu.pitch_trim + pitch_delta, -TRIM_LIMIT, TRIM_LIMIT)
+            )
+            self.imu.roll_trim = float(
+                np.clip(self.imu.roll_trim + roll_delta, -TRIM_LIMIT, TRIM_LIMIT)
+            )
+        if "imu_trim" in resets:
+            self._reset_imu_trim()
+        if save_trim:
+            self._save_imu_trim()
+
+    def _apply_walk_settings(self, d):
+        """Apply live walk-tuning edits. action_scale is ramped (see run()), not
+        stepped, so a live change can't jump the leg amplitude in one tick."""
+        for key, v in d.items():
+            try:
+                if key == "action_scale":
+                    self._action_scale_target = float(np.clip(float(v), 0.0, 0.6))
+                elif key == "phase_frequency_factor_offset":
+                    self.phase_frequency_factor_offset = float(
+                        np.clip(float(v), -0.5, 0.5)
+                    )
+                elif key == "velocity_clip":
+                    self.velocity_clip = bool(v)
+                elif key == "max_motor_velocity_rad_s":
+                    self.max_motor_velocity = float(np.clip(float(v), 0.5, 12.0))
+                elif key == "governor_enabled":
+                    self.governor.enabled = bool(v)
+                elif key == "governor_tilt_lo_deg":
+                    self.governor.tilt_lo_deg = float(np.clip(float(v), 0.0, 45.0))
+                elif key == "governor_tilt_hi_deg":
+                    self.governor.tilt_hi_deg = float(np.clip(float(v), 0.0, 60.0))
+                elif key == "governor_rate_lo":
+                    self.governor.rate_lo = float(np.clip(float(v), 0.0, 20.0))
+                elif key == "governor_rate_hi":
+                    self.governor.rate_hi = float(np.clip(float(v), 0.0, 30.0))
+                elif key == "governor_floor":
+                    self.governor.floor = float(np.clip(float(v), 0.0, 1.0))
+                elif key == "governor_smooth":
+                    self.governor.smooth = float(np.clip(float(v), 0.01, 1.0))
+            except (ValueError, TypeError):
+                logger.warning("Ignoring bad walk setting %s=%r", key, v)
+
+    def _governor_config_dict(self) -> dict:
+        g = self.governor
+        return {
+            "enabled": bool(g.enabled),
+            "tilt_lo_deg": round(float(g.tilt_lo_deg), 3),
+            "tilt_hi_deg": round(float(g.tilt_hi_deg), 3),
+            "rate_lo": round(float(g.rate_lo), 3),
+            "rate_hi": round(float(g.rate_hi), 3),
+            "floor": round(float(g.floor), 3),
+            "smooth": round(float(g.smooth), 3),
+        }
+
+    def _save_walk_settings(self):
+        fields = {
+            "action_scale": round(float(self._action_scale_target), 4),
+            "phase_frequency_factor_offset": round(
+                float(self.phase_frequency_factor_offset), 4
+            ),
+            "velocity_clip": bool(self.velocity_clip),
+            "max_motor_velocity_rad_s": round(float(self.max_motor_velocity), 3),
+            "stability_governor": self._governor_config_dict(),
+        }
+        backup = save_config_fields(fields, config_json_path=self.duck_config_path)
+        logger.info("Saved walk tuning %s (backup %s)", fields, backup)
+
+    def _reset_walk_settings(self):
+        """Live-reset walk tuning to the known-good defaults (NOT persisted until
+        the next Save)."""
+        d = WALK_TUNING_DEFAULTS
+        self._action_scale_target = float(d["action_scale"])
+        self.phase_frequency_factor_offset = float(d["phase_frequency_factor_offset"])
+        self.velocity_clip = bool(d["velocity_clip"])
+        self.max_motor_velocity = float(d["max_motor_velocity_rad_s"])
+        g = d["stability_governor"]
+        self.governor.enabled = bool(g["enabled"])
+        self.governor.tilt_lo_deg = float(g["tilt_lo_deg"])
+        self.governor.tilt_hi_deg = float(g["tilt_hi_deg"])
+        self.governor.rate_lo = float(g["rate_lo"])
+        self.governor.rate_hi = float(g["rate_hi"])
+        self.governor.floor = float(g["floor"])
+        self.governor.smooth = float(g["smooth"])
+        logger.info("Reset walk tuning to defaults %s", d)
+
+    def _save_imu_trim(self):
+        trim = {"pitch": float(self.imu.pitch_trim), "roll": float(self.imu.roll_trim)}
+        backup = save_config_fields(
+            {"imu_trim": trim}, config_json_path=self.duck_config_path
+        )
+        logger.info("Saved imu_trim=%s (backup %s)", trim, backup)
+
+    def _reset_imu_trim(self):
+        """Live-reset the IMU mounting trim to neutral (NOT persisted until Save)."""
+        self.imu.pitch_trim = float(IMU_TRIM_DEFAULTS["pitch"])
+        self.imu.roll_trim = float(IMU_TRIM_DEFAULTS["roll"])
+        logger.info("Reset imu trim to neutral")
 
     def get_obs(self):
 
@@ -372,6 +559,31 @@ class RLWalk:
             self._up_calib_acc = np.zeros(3)
             self._up_calib_count = 0
 
+    def _sample_battery(self):
+        """Throttled, paused-only battery sample (see run()'s paused branch —
+        never called while actively walking). Uses HWI.read_battery_handoff(),
+        which briefly releases and reconnects the servo bus (~0.2s, no goal
+        positions sent during that window) — exactly why this is gated to the
+        paused branch and throttled to BATTERY_SAMPLE_PERIOD_S, never called
+        from the hot 50 Hz path."""
+        now = time.time()
+        if now - self._battery_last_sample_t < BATTERY_SAMPLE_PERIOD_S:
+            return
+        self._battery_last_sample_t = now
+        voltage, _temp = self.hwi.read_battery_handoff()
+        v_min = self.duck_config.battery.get("v_min")
+        v_max = self.duck_config.battery.get("v_max")
+        kwargs = {}
+        if v_min is not None:
+            kwargs["v_min"] = v_min
+        if v_max is not None:
+            kwargs["v_max"] = v_max
+        self._telemetry_battery = {
+            "voltage": voltage,
+            "percent": estimate_percent(voltage, **kwargs),
+            "charging": self._battery_estimator.update(now, voltage),
+        }
+
     def _fall_detected(self):
         if self._up_vector is None:
             return False
@@ -425,6 +637,82 @@ class RLWalk:
                     self.last_commands, self.buttons, left_trigger, right_trigger = (
                         self.controller.get_last_command()
                     )
+
+                    if self.control_bus is not None:
+                        # Web sticks OVERRIDE the pad's while actively posted
+                        # (stale -> pad wins); triggers are the max of both.
+                        active, cb_l_x, cb_l_y, cb_r_x, cb_r_y, cb_lt, cb_rt = (
+                            self.control_bus.stick_override(t)
+                        )
+                        if active:
+                            self.last_commands = shape_commands(
+                                cb_l_x,
+                                cb_l_y,
+                                cb_r_x,
+                                self.controller.head_control_mode,
+                                self.last_commands,
+                            )
+                        left_trigger = max(left_trigger, cb_lt)
+                        right_trigger = max(right_trigger, cb_rt)
+
+                        # Web Y toggles head-control mode independently of the
+                        # pad's own Y edge-detection (which already ran inside
+                        # get_last_command() above) — tracked separately so a
+                        # physical pad Y-press can't get double-counted here.
+                        cb_buttons = self.control_bus.consume_buttons()
+                        cb_Y = cb_buttons["Y"]
+                        if (
+                            cb_Y
+                            and not self._prev_control_bus_Y
+                            and not self.controller.only_head_control
+                        ):
+                            self.controller.head_control_mode = (
+                                not self.controller.head_control_mode
+                            )
+                        self._prev_control_bus_Y = cb_Y
+
+                        # OR web buttons into the pad's current state and feed
+                        # the SAME Buttons edge-detector, so .triggered/.is_pressed
+                        # work identically regardless of which source acted.
+                        self.buttons.update(
+                            self.buttons.A.is_pressed or cb_buttons["A"],
+                            self.buttons.B.is_pressed or cb_buttons["B"],
+                            self.buttons.X.is_pressed or cb_buttons["X"],
+                            self.buttons.Y.is_pressed or cb_Y,
+                            self.buttons.LB.is_pressed or cb_buttons["LB"],
+                            self.buttons.RB.is_pressed or cb_buttons["RB"],
+                            self.buttons.dpad_up.is_pressed or cb_buttons["dpad_up"],
+                            self.buttons.dpad_down.is_pressed
+                            or cb_buttons["dpad_down"],
+                            start=self.buttons.START.is_pressed,
+                            back=self.buttons.BACK.is_pressed,
+                            LStickButton=self.buttons.LStickButton.is_pressed,
+                            RStickButton=self.buttons.RStickButton.is_pressed,
+                            dpad_left=self.buttons.dpad_left.is_pressed
+                            or cb_buttons["dpad_left"],
+                            dpad_right=self.buttons.dpad_right.is_pressed
+                            or cb_buttons["dpad_right"],
+                        )
+
+                        self._consume_control_bus_settings()
+
+                    # Stability governor: ease drive commands (indices 0:3 only;
+                    # head commands untouched) using the PREVIOUS tick's cached
+                    # IMU — this tick's fresh read happens below in get_obs().
+                    # Disabled by default -> pure pass-through (scale == 1.0),
+                    # and sits strictly upstream of fall detection, which is
+                    # unchanged and remains the pause+motors-off safety net.
+                    if self._telemetry_imu_data is not None:
+                        pr = accel_pitch_roll(self._telemetry_imu_data.get("accelero"))
+                        if pr is not None:
+                            tilt_deg = tilt_angle_deg(pr["pitch"], pr["roll"])
+                            rate = tilt_rate(
+                                self._telemetry_imu_data.get("gyro", [0.0, 0.0])
+                            )
+                            scale = self.governor.update(tilt_deg, rate)
+                            if scale != 1.0:
+                                for k in range(3):
+                                    self.last_commands[k] *= scale
 
                     if (
                         self.paused
@@ -541,6 +829,7 @@ class RLWalk:
                 if self.paused:
                     if self.motors_enabled and self.duck_config.fall_detection:
                         self._update_fall_calibration()
+                    self._sample_battery()
                     time.sleep(0.1)
                     continue
 
@@ -582,6 +871,15 @@ class RLWalk:
                 self.last_action = action.copy()
 
                 # action = np.zeros(10)
+
+                # Ramp toward any live-tuned target rather than stepping instantly.
+                if self.action_scale != self._action_scale_target:
+                    step = np.clip(
+                        self._action_scale_target - self.action_scale,
+                        -ACTION_SCALE_RAMP,
+                        ACTION_SCALE_RAMP,
+                    )
+                    self.action_scale += step
 
                 self.motor_targets = self.init_pos + action * self.action_scale
 

@@ -19,6 +19,9 @@ Runtime software for the [Open Duck Mini](https://github.com/apirrone/Open_Duck_
   - [duck_config.json Reference](#duck_configjson-reference)
   - [Controller Types](#controller-types)
   - [Generic USB Controller Mapping](#generic-usb-controller-mapping)
+  - [Remote Control (gamepad on a separate PC)](#remote-control-gamepad-on-a-separate-pc)
+  - [Telemetry & Eye Color (from a separate PC)](#telemetry--eye-color-from-a-separate-pc)
+  - [Web Control UI (phone browser, no PC app needed)](#web-control-ui-phone-browser-no-pc-app-needed)
 - [Hardware Configuration](#hardware-configuration)
   - [Speaker Wiring](#speaker-wiring)
 - [Testing and Calibration](#testing-and-calibration)
@@ -153,6 +156,12 @@ cp example_config.json ~/duck_config.json
 | `expression_features.sounds` | bool | `false` | Enable audio playback |
 | `expression_features.antennas` | bool | `false` | Enable servo-driven antennas |
 | `joints_offsets` | object | all `0.0` | Per-joint offset corrections (radians) |
+| `imu_trim.pitch` / `.roll` | float | `0.0` | Residual IMU mounting-tilt correction (radians) — live-tunable from `/control` |
+| `stability_governor.enabled` | bool | `false` | Ease drive commands when tipping, upstream of fall detection — see [Web Control UI](#web-control-ui-phone-browser-no-pc-app-needed) |
+| `action_scale` | float | `0.25` | Policy residual scale — live-tunable from `/control` |
+| `velocity_clip` | bool | `false` | Persisted/tunable for parity; enforcement not implemented yet |
+| `max_motor_velocity_rad_s` | float | `5.24` | Persisted/tunable for parity; enforcement not implemented yet |
+| `battery.v_min` / `.v_max` / `.v_full` | float | 2S LiPo defaults | `/control`'s battery gauge thresholds — voltage read via a brief servo-bus handoff, paused-only |
 
 ### Controller Types
 
@@ -276,6 +285,44 @@ uv run duck-remote-eyes --host <duck-ip> --color 255,0,0
 uv run duck-remote-eyes --host <duck-ip> --clear
 uv run duck-remote-eyes --host <duck-ip> --status
 ```
+
+### Web Control UI (phone browser, no PC app needed)
+
+With `web_stats.enabled` set, the same server also serves a touch-control page
+at `http://<duck-ip>:<port>/control` — joystick + A/B/X/Y/LB/RB/dpad, pause/
+resume, live IMU-trim nudging, live walk-tuning (action_scale, gait offset,
+stability governor), eye color, and a battery gauge. No install needed —
+just open the URL on a phone or any browser on the same network.
+
+It's backed by `ControlBus` (`rl_walk/control_bus.py`), a third, independent
+way to drive `RLWalk` alongside `XBoxController`/`RemoteController` — the web
+sticks override the gamepad's only while actively posted (releasing/closing
+the tab hands control straight back to the pad), buttons OR together into the
+same edge-detector, and triggers are the max of both sources. `/api/*` routes:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/command` | POST | `{"active": bool, "l_x", "l_y", "r_x", "r_y", "left_trigger", "right_trigger"}` — virtual sticks |
+| `/api/button` | POST | `{"button": "A", "action": "press"\|"down"\|"up"}` — `A B X Y LB RB dpad_up dpad_down dpad_left dpad_right` |
+| `/api/trim` | POST | `{"axis": "pitch"\|"roll", "delta": 0.002}` to nudge, or `{"action": "save"}` to persist |
+| `/api/setting` | POST | `{"group": "walk", "key": ..., "value": ...}` to edit live, or `{"group": "walk", "action": "save"\|"reset"}` |
+
+**IMU trim** (`imu_trim` in `duck_config.json`) corrects small residual mounting
+tilt the BNO055 axis-remap can't — a rotation applied to accel/gyro/gravity in
+`hardware/imu_trim.py`, tuned live and clamped to ±0.1 rad. **Walk tuning**
+(`action_scale`, `velocity_clip`, `max_motor_velocity_rad_s`) and the
+**stability governor** (`stability_governor` — eases drive commands, not head
+commands, when tipping) live under the same `"walk"` settings group and both
+save/reset together. The governor is disabled by default (pure pass-through)
+and sits strictly *upstream* of fall detection — it's an additional layer, not
+a replacement; fall detection's pause+motors-off safety net is unchanged.
+`velocity_clip` is exposed/persisted for parity but per-tick clipping
+enforcement isn't implemented yet, so toggling it doesn't currently change
+motor behavior. The battery gauge is read via `HWI.read_battery_handoff()` —
+`rustypot` 0.1.0 doesn't expose voltage/temperature registers, so this briefly
+releases the servo connection, reads through `pypot` instead, then always
+reconnects `rustypot` before returning (paused-only, throttled to a few
+seconds — see its docstring for the safety reasoning).
 
 ---
 
@@ -401,6 +448,7 @@ src/open_duck_mini_runtime/
 ├── hardware/               # Physical hardware drivers
 │   ├── hwi.py              #   Motor hardware interface (Feetech servos)
 │   ├── raw_imu.py          #   BNO055 IMU — gyro, accelerometer, gravity
+│   ├── imu_trim.py         #   Residual mounting-tilt correction (pure math)
 │   ├── imu.py              #   BNO055 IMU — quaternion/Euler mode
 │   ├── feet_contacts.py    #   GPIO foot contact sensors
 │   ├── eyes.py             #   NeoPixel eye LEDs with blink thread
@@ -418,7 +466,12 @@ src/open_duck_mini_runtime/
 │
 └── rl_walk/                # RL policy and main walk loop
     ├── walk.py             #   RLWalk — main 50 Hz control loop
-    ├── stats_server.py     #   Stats/telemetry/eye-color HTTP server (web_stats)
+    ├── stats_server.py     #   Stats/telemetry/eye-color/control HTTP server (web_stats)
+    ├── control_bus.py      #   Thread-safe input bus for the /control web UI
+    ├── stability_governor.py  # Tilt-based drive-command easing (pure logic)
+    ├── battery.py          #   Voltage → percent/charging estimate (pure logic)
+    ├── walk_defaults.py    #   Known-good walk-tuning / IMU-trim reset targets
+    ├── webui/control.html  #   Single-file phone control page served at /control
     ├── onnx_infer.py       #   ONNX model inference wrapper
     ├── poly_reference_motion.py  # Polynomial gait reference
     └── rl_utils.py         #   Action filters, coordinate helpers

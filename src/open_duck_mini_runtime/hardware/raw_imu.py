@@ -10,16 +10,29 @@ from queue import Queue
 from threading import Thread
 import time
 
+from open_duck_mini_runtime.hardware.imu_trim import apply_trim
+
 logger = logging.getLogger(__name__)
 
 
 # TODO filter spikes
 class Imu:
     def __init__(
-        self, sampling_freq, user_pitch_bias=0, calibrate=False, upside_down=True
+        self,
+        sampling_freq,
+        user_pitch_bias=0,
+        calibrate=False,
+        upside_down=True,
+        pitch_trim=0.0,
+        roll_trim=0.0,
     ):
         self.sampling_freq = sampling_freq
         self.calibrate = calibrate
+        # Residual mounting-tilt trim (radians) applied to accel/gyro/gravity after
+        # the axis remap below. Default 0 -> identity. The legacy user_pitch_bias
+        # (degrees) folds in as extra pitch so that param is no longer a no-op.
+        self.pitch_trim = float(pitch_trim) + float(np.radians(user_pitch_bias))
+        self.roll_trim = float(roll_trim)
 
         i2c = busio.I2C(board.SCL, board.SDA)
         self.imu = adafruit_bno055.BNO055_I2C(i2c)
@@ -140,6 +153,14 @@ class Imu:
                 continue
 
             accelero[0] -= self.x_offset
+
+            # Correct residual IMU mounting tilt (same rigid rotation on accel,
+            # gyro, and gravity — they share the sensor->body frame). Default
+            # trim is 0 -> this is a no-op.
+            if self.pitch_trim or self.roll_trim:
+                accelero = apply_trim(accelero, self.pitch_trim, self.roll_trim)
+                gyro = apply_trim(gyro, self.pitch_trim, self.roll_trim)
+                gravity = apply_trim(gravity, self.pitch_trim, self.roll_trim)
 
             data = {
                 "gyro": gyro,

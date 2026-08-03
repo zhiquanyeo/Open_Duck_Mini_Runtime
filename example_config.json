@@ -25,9 +25,38 @@
     },
 
     "web_stats": {
-        "_comment": "Serves a stats page (control mode, pause state, gait frequency, etc.) at http://<duck-ip>:<port>/, with a Shutdown button (POST /shutdown) to stop duck-startup without SSH.",
+        "_comment": "Serves a stats page (control mode, pause state, gait frequency, etc.) at http://<duck-ip>:<port>/, with a Shutdown button (POST /shutdown) to stop duck-startup without SSH. Also serves a phone-facing control UI at /control (joystick, buttons, IMU trim, walk tuning, eye color) backed by ControlBus.",
         "enabled": false,
         "port": 8080
+    },
+
+    "imu_trim": {
+        "_comment": "Residual IMU mounting-tilt correction (radians), tuned live from the /control web UI (or nudge programmatically) and saved here. Default 0/0 is a no-op regardless of mounting.",
+        "pitch": 0.0,
+        "roll": 0.0
+    },
+
+    "stability_governor": {
+        "_comment": "Eases drive commands (not head commands) when tipping, BEFORE fall_detection would trigger — an additional, independent layer; fall_detection's pause+motors-off safety net is unaffected either way. Disabled (pure pass-through) by default. tilt_*_deg / rate_* are a lo->hi ramp; floor is the most-throttled command scale; smooth is the EMA rate.",
+        "enabled": false,
+        "tilt_lo_deg": 10.0,
+        "tilt_hi_deg": 25.0,
+        "rate_lo": 2.5,
+        "rate_hi": 7.0,
+        "floor": 0.35,
+        "smooth": 0.3
+    },
+
+    "action_scale": 0.25,
+    "velocity_clip": false,
+    "max_motor_velocity_rad_s": 5.24,
+    "_walk_tuning_comment": "action_scale / velocity_clip / max_motor_velocity_rad_s are all live-tunable from the /control web UI. NOTE: velocity_clip is exposed/persisted for parity with the tuning UI but per-tick clipping enforcement is not implemented yet, so toggling it doesn't currently change motor behavior.",
+
+    "battery": {
+        "_comment": "Optional overrides for the /control web UI's battery gauge (assumes a 2S LiPo by default). Voltage is read via HWI.read_battery_handoff() — a brief (~0.2s) servo-bus handoff to pypot, only while paused, throttled to every few seconds (see hwi.py).",
+        "v_min": 6.6,
+        "v_max": 8.4,
+        "v_full": 8.5
     },
 
     "remote_control": {

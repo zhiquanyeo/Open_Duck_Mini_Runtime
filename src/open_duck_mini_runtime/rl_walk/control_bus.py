@@ -1,0 +1,204 @@
+"""
+Shared control bus: lets the phone web UI and the local gamepad drive the robot in
+parallel.
+
+The web server (stats_server.py) writes joystick/button intents in from HTTP
+handler threads; RLWalk.run() folds them into the SAME command vector + button
+edge-detector the gamepad feeds, so both sources share one code path and you can
+swap between them freely mid-session.
+
+Merge policy:
+  * Sticks: while the web posts `active=True` (and hasn't gone stale) the web axes
+    OVERRIDE the gamepad/remote-controller axes; otherwise the pad wins. So
+    releasing the on-screen stick (which posts active=False, or simply stops
+    posting) hands control straight back to the pad.
+  * Triggers: max of the two sources (either can raise an antenna).
+  * Buttons: a web "press" becomes a single edge; web "down"/"up" hold across
+    ticks (for LB-sprint-style holds). Web is OR-ed with the gamepad's held state
+    before edge detection, so `.triggered`/`.is_pressed` work identically no
+    matter which source acted.
+
+Unlike the fork this is ported from, telemetry does NOT flow through this bus —
+RLWalk.get_telemetry()/get_stats() already publish a thread-safe cached snapshot
+the stats server serves directly, so ControlBus only needs to carry the *input*
+side (sticks/buttons/trim/settings).
+
+Pure stdlib + thread-safe; no hardware imports, so it unit-tests off-robot.
+"""
+
+import threading
+
+BUTTONS = ("A", "B", "X", "Y", "LB", "RB",
+           "dpad_up", "dpad_down", "dpad_left", "dpad_right")
+
+# If the phone stops posting commands for this long, its `active` override lapses
+# and the pad regains the sticks (so a closed browser tab can't wedge input).
+COMMAND_STALE_S = 0.5
+
+
+class ControlBus:
+    def __init__(self, stale_s=COMMAND_STALE_S):
+        self._lock = threading.Lock()
+        self._stale_s = stale_s
+
+        self._active = False
+        self._axes = [0.0, 0.0, 0.0, 0.0]  # l_x, l_y, r_x, r_y
+        self._trig = [0.0, 0.0]  # left, right
+        self._cmd_time = None  # wall time of the last set_command
+
+        self._held = {b: False for b in BUTTONS}
+        self._pending = {b: 0 for b in BUTTONS}  # queued momentary "press" taps
+        self._gap = {b: False for b in BUTTONS}  # forced release tick after a tap
+
+        # IMU-trim tuner channel: the web posts +/- nudges (accumulated) and a save
+        # request; the walk loop drains them each tick (see consume_trim). Trim
+        # RESET goes through the generic settings-reset channel below
+        # (push_setting_reset("imu_trim")), same as walk/governor resets.
+        self._trim_delta = {"pitch": 0.0, "roll": 0.0}
+        self._trim_save = False
+
+        # Generic live-settings channel: the web posts {group, key, value} edits
+        # (walk tuning, stability governor) and per-group "save to duck_config"/
+        # "reset to defaults" requests; the control loop drains them each tick
+        # (see consume_settings) and applies/persists them. Last write per key wins.
+        self._settings = {}  # {group: {key: value, ...}, ...}
+        self._setting_saves = set()  # {group, ...} groups asked to persist
+        self._setting_resets = set()  # {group, ...} groups asked to reset to defaults
+
+    # ------------------------------------------------------ web -> robot (in)
+    def set_command(self, now, active=False, l_x=0.0, l_y=0.0, r_x=0.0, r_y=0.0,
+                     left_trigger=0.0, right_trigger=0.0):
+        with self._lock:
+            self._active = bool(active)
+            self._axes = [_c11(l_x), _c11(l_y), _c11(r_x), _c11(r_y)]
+            self._trig = [_c01(left_trigger), _c01(right_trigger)]
+            self._cmd_time = now
+
+    def push_button(self, button, action="press"):
+        """action: 'press' (a tap -> one edge) | 'down' | 'up' (held)."""
+        if button not in self._held:
+            return False
+        with self._lock:
+            if action == "press":
+                self._pending[button] += 1
+            elif action == "down":
+                self._held[button] = True
+            elif action == "up":
+                self._held[button] = False
+            else:
+                return False
+        return True
+
+    def push_trim(self, axis, delta):
+        """Queue an IMU-trim nudge from the web (accumulated until consumed)."""
+        if axis not in self._trim_delta:
+            return False
+        with self._lock:
+            self._trim_delta[axis] += float(delta)
+        return True
+
+    def push_trim_save(self):
+        """Queue a 'save the current trim to duck_config' request from the web."""
+        with self._lock:
+            self._trim_save = True
+        return True
+
+    def push_setting(self, group, key, value):
+        """Queue a live-settings edit (group="walk"|"stability_governor").
+        Value is stored verbatim (bool/number/str); the loop clamps on apply.
+        Last write for a given (group,key) before the next consume wins."""
+        group, key = str(group), str(key)
+        if not group or not key:
+            return False
+        with self._lock:
+            self._settings.setdefault(group, {})[key] = value
+        return True
+
+    def push_setting_save(self, group):
+        """Queue a 'persist this group to duck_config' request."""
+        group = str(group)
+        if not group:
+            return False
+        with self._lock:
+            self._setting_saves.add(group)
+        return True
+
+    def push_setting_reset(self, group):
+        """Queue a 'reset this group to known-good defaults' request."""
+        group = str(group)
+        if not group:
+            return False
+        with self._lock:
+            self._setting_resets.add(group)
+        return True
+
+    # ------------------------------------------------------ robot <- web (read)
+    def consume_settings(self):
+        """Return (settings, saves, resets) accumulated since the last call and
+        clear them. `settings` is {group: {key: value}}, `saves`/`resets` are sets
+        of group names to persist / reset. Empty ({}, set(), set()) when nothing
+        is pending."""
+        with self._lock:
+            settings = self._settings
+            saves = self._setting_saves
+            resets = self._setting_resets
+            self._settings = {}
+            self._setting_saves = set()
+            self._setting_resets = set()
+            return settings, saves, resets
+
+    def consume_trim(self):
+        """Return (pitch_delta, roll_delta, save) accumulated since the last call,
+        resetting them. The walk loop applies the deltas to the live IMU trim."""
+        with self._lock:
+            p = self._trim_delta["pitch"]
+            r = self._trim_delta["roll"]
+            s = self._trim_save
+            self._trim_delta = {"pitch": 0.0, "roll": 0.0}
+            self._trim_save = False
+            return (p, r, s)
+
+    def stick_override(self, now):
+        """Return (active, l_x, l_y, r_x, r_y, left_trigger, right_trigger).
+        `active` is False if the web hasn't posted recently (stale) -> pad wins."""
+        with self._lock:
+            active = (
+                self._active
+                and self._cmd_time is not None
+                and (now - self._cmd_time) <= self._stale_s
+            )
+            return (active, *self._axes, *self._trig)
+
+    def consume_buttons(self):
+        """Return {button: pressed_bool} for THIS tick.
+
+        Held buttons stay pressed. A queued tap is emitted as one pressed tick
+        FOLLOWED by a forced release tick, so N rapid taps become N separate
+        rising edges (two taps consumed back-to-back would otherwise look like
+        one long hold = one edge)."""
+        with self._lock:
+            out = {}
+            for b in BUTTONS:
+                if self._held[b]:
+                    pressed = True
+                elif self._gap[b]:
+                    self._gap[b] = False  # release tick between taps
+                    pressed = False
+                elif self._pending[b] > 0:
+                    self._pending[b] -= 1
+                    self._gap[b] = True
+                    pressed = True
+                else:
+                    pressed = False
+                out[b] = pressed
+            return out
+
+
+def _c11(v):
+    v = float(v)
+    return -1.0 if v < -1.0 else 1.0 if v > 1.0 else v
+
+
+def _c01(v):
+    v = float(v)
+    return 0.0 if v < 0.0 else 1.0 if v > 1.0 else v

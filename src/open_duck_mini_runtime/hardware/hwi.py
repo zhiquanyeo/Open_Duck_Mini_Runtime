@@ -9,6 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 class HWI:
+    # Feetech present-voltage/temperature registers report volts in units of
+    # 0.1V (matches tools/check_voltage.py). If a future rustypot build starts
+    # returning volts directly, set this to 1.0.
+    VOLTAGE_SCALE = 0.1
+
     def __init__(self, duck_config: DuckConfig, usb_port: str = "/dev/ttyACM0"):
 
         self.duck_config = duck_config
@@ -77,6 +82,7 @@ class HWI:
         self.kds = np.ones(len(self.joints)) * 0  # default kd
         self.low_torque_kps = np.ones(len(self.joints)) * 2
 
+        self.usb_port = usb_port
         self.io = rustypot.feetech(usb_port, 1000000)
 
     def set_kps(self, kps):
@@ -180,3 +186,111 @@ class HWI:
                 logger.warning("read_present_velocity failed for %s: %s", joint, e)
                 return None
         return np.array(np.around(velocities, 3))
+
+    def get_present_voltage(self):
+        """
+        Mean bus voltage (V) read through the SAME rustypot connection the loop
+        already owns — the serial bus is single-owner, so this never opens a
+        second connection. Best effort: returns None if this rustypot build
+        doesn't expose the register (true as of rustypot 0.1.0 — only
+        position/velocity are bound), so callers must handle None gracefully.
+        For an actual reading on builds without the register, see
+        read_battery_handoff() below.
+        """
+        reader = getattr(self.io, "read_present_voltage", None)
+        if reader is None:
+            return None
+        try:
+            vals = reader(list(self.joints.values()))
+        except Exception as e:
+            logger.warning("voltage read failed: %s", e)
+            return None
+        vals = [float(v) * self.VOLTAGE_SCALE for v in vals if v is not None]
+        if not vals:
+            return None
+        return round(sum(vals) / len(vals), 2)
+
+    def get_present_temperature(self):
+        """Hottest servo temperature (°C), or None if unavailable. Same
+        guarded, single-connection approach as get_present_voltage."""
+        reader = getattr(self.io, "read_present_temperature", None)
+        if reader is None:
+            return None
+        try:
+            vals = reader(list(self.joints.values()))
+        except Exception as e:
+            logger.warning("temperature read failed: %s", e)
+            return None
+        vals = [float(v) for v in vals if v is not None]
+        if not vals:
+            return None
+        return round(max(vals), 1)
+
+    def read_battery_handoff(self):
+        """
+        Read servo bus voltage (V, mean) + hottest temp (°C) via a brief BUS
+        HANDOFF: rustypot 0.1.0 can't read those registers, so this
+        momentarily RELEASES the serial port, reads them through pypot
+        (which can), then ALWAYS re-acquires rustypot so the control loop
+        keeps the bus.
+
+        Costs ~0.2s during which NO goal positions are sent — the servos
+        simply hold their last goal (torque + internal PID stay on). The
+        CALLER must only invoke this when it's safe to skip writes briefly
+        (paused/idle) — NEVER mid-stride. See RLWalk._sample_battery(),
+        which only calls this from the paused branch of run(), throttled.
+
+        Returns (voltage, temp), each possibly None. Single-threaded use
+        only (call it from the control loop, not the HTTP handler thread —
+        same rule as every other servo-bus read in this codebase).
+        """
+        import gc
+
+        ids = list(self.joints.values())
+        voltage = temp = None
+        try:
+            self.io = None  # drop the rustypot handle -> releases the port
+            gc.collect()
+            time.sleep(0.02)
+            from pypot.feetech import FeetechSTS3215IO
+
+            pio = FeetechSTS3215IO(self.usb_port, baudrate=1000000, use_sync_read=True)
+            try:
+                vv = pio.get_present_voltage(ids)
+                if vv:
+                    voltage = round(sum(vv) / len(vv) * self.VOLTAGE_SCALE, 2)
+                try:
+                    tt = pio.get_present_temperature(ids)
+                    if tt:
+                        temp = round(max(tt), 1)
+                except Exception:
+                    temp = None  # temp is a bonus, never block on it
+            finally:
+                try:
+                    pio.close()
+                except Exception:
+                    pass
+                pio = None
+                gc.collect()
+                time.sleep(0.02)
+        except Exception as e:
+            logger.warning("battery handoff read failed: %s", e)
+        finally:
+            # ALWAYS re-acquire rustypot so control resumes, even if pypot errored.
+            if self.io is None:
+                try:
+                    self.io = rustypot.feetech(self.usb_port, 1000000)
+                except Exception:
+                    # One retry — losing the bus here is fatal to the loop.
+                    time.sleep(0.1)
+                    self.io = rustypot.feetech(self.usb_port, 1000000)
+                try:
+                    # Servos keep their gains across the handoff on their own;
+                    # re-apply anyway, belt-and-braces. Reuses set_kps/set_kds
+                    # (per-motor calls) rather than guessing at a batch-call
+                    # signature this rustypot binding hasn't been exercised with.
+                    self.set_kps(self.kps)
+                    self.set_kds(self.kds)
+                except Exception as e:
+                    logger.warning("re-apply gains after handoff failed: %s", e)
+        return voltage, temp
