@@ -145,8 +145,17 @@
     <input type="range" id="s_gov_tilt_hi" min="0" max="60" step="1">
   </div>
   <div class="field">
+    <label>governor rate lo/hi (rad/s) <span class="val" id="v_gov_rate">—</span></label>
+    <input type="range" id="s_gov_rate_lo" min="0" max="20" step="0.5">
+    <input type="range" id="s_gov_rate_hi" min="0" max="30" step="0.5">
+  </div>
+  <div class="field">
     <label>governor floor <span class="val" id="v_gov_floor">—</span></label>
     <input type="range" id="s_gov_floor" min="0" max="1" step="0.05">
+  </div>
+  <div class="field">
+    <label>governor smooth <span class="val" id="v_gov_smooth">—</span></label>
+    <input type="range" id="s_gov_smooth" min="0.01" max="1" step="0.01">
   </div>
   <div class="save-row">
     <button class="primary" id="walkSave">Save</button>
@@ -286,7 +295,9 @@ document.getElementById('trimReset').addEventListener('click', () => post('/api/
 const walkFields = {
   action_scale: 's_action_scale', phase_frequency_factor_offset: 's_gait_offset',
   max_motor_velocity_rad_s: 's_max_vel', governor_tilt_lo_deg: 's_gov_tilt_lo',
-  governor_tilt_hi_deg: 's_gov_tilt_hi', governor_floor: 's_gov_floor',
+  governor_tilt_hi_deg: 's_gov_tilt_hi', governor_rate_lo: 's_gov_rate_lo',
+  governor_rate_hi: 's_gov_rate_hi', governor_floor: 's_gov_floor',
+  governor_smooth: 's_gov_smooth',
 };
 let liveEdit = false;
 Object.entries(walkFields).forEach(([key, id]) => {
@@ -311,7 +322,10 @@ function updateWalkLabels() {
   document.getElementById('v_max_vel').textContent = document.getElementById('s_max_vel').value;
   document.getElementById('v_gov_tilt').textContent =
     document.getElementById('s_gov_tilt_lo').value + ' / ' + document.getElementById('s_gov_tilt_hi').value;
+  document.getElementById('v_gov_rate').textContent =
+    document.getElementById('s_gov_rate_lo').value + ' / ' + document.getElementById('s_gov_rate_hi').value;
   document.getElementById('v_gov_floor').textContent = document.getElementById('s_gov_floor').value;
+  document.getElementById('v_gov_smooth').textContent = document.getElementById('s_gov_smooth').value;
 }
 
 // ------------------------------------------------------------ LED brightness
@@ -387,7 +401,10 @@ async function poll() {
       document.getElementById('c_gov_enabled').checked = !!gov.enabled;
       document.getElementById('s_gov_tilt_lo').value = gov.tilt_lo_deg ?? 10;
       document.getElementById('s_gov_tilt_hi').value = gov.tilt_hi_deg ?? 25;
+      document.getElementById('s_gov_rate_lo').value = gov.rate_lo ?? 2.5;
+      document.getElementById('s_gov_rate_hi').value = gov.rate_hi ?? 7.0;
       document.getElementById('s_gov_floor').value = gov.floor ?? 0.35;
+      document.getElementById('s_gov_smooth').value = gov.smooth ?? 0.3;
       updateWalkLabels();
     }
 
