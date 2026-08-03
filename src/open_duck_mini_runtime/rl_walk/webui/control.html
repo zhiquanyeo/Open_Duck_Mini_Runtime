@@ -155,6 +155,26 @@
 </div>
 
 <div class="panel">
+  <h2>LED brightness</h2>
+  <div class="field">
+    <label>projector <span class="val" id="v_bright_projector">—</span></label>
+    <input type="range" id="s_bright_projector" min="0" max="1" step="0.05">
+  </div>
+  <div class="field">
+    <label>left eye <span class="val" id="v_bright_left_eye">—</span></label>
+    <input type="range" id="s_bright_left_eye" min="0" max="1" step="0.05">
+  </div>
+  <div class="field">
+    <label>right eye <span class="val" id="v_bright_right_eye">—</span></label>
+    <input type="range" id="s_bright_right_eye" min="0" max="1" step="0.05">
+  </div>
+  <div class="save-row">
+    <button class="primary" id="brightnessSave">Save</button>
+    <button id="brightnessReset">Reset</button>
+  </div>
+</div>
+
+<div class="panel">
   <h2>Status</h2>
   <div class="diag" id="diag">—</div>
 </div>
@@ -282,6 +302,27 @@ function updateWalkLabels() {
   document.getElementById('v_gov_floor').textContent = document.getElementById('s_gov_floor').value;
 }
 
+// ------------------------------------------------------------ LED brightness
+const brightnessFields = {
+  projector: 's_bright_projector', left_eye: 's_bright_left_eye', right_eye: 's_bright_right_eye',
+};
+let brightnessLiveEdit = false;
+Object.entries(brightnessFields).forEach(([key, id]) => {
+  document.getElementById(id).addEventListener('input', (ev) => {
+    brightnessLiveEdit = true;
+    post('/api/setting', {group: 'led_brightness', key, value: parseFloat(ev.target.value)});
+    updateBrightnessLabels();
+  });
+});
+document.getElementById('brightnessSave').addEventListener('click', () => post('/api/setting', {group: 'led_brightness', action: 'save'}));
+document.getElementById('brightnessReset').addEventListener('click', () => { post('/api/setting', {group: 'led_brightness', action: 'reset'}); brightnessLiveEdit = false; });
+
+function updateBrightnessLabels() {
+  document.getElementById('v_bright_projector').textContent = document.getElementById('s_bright_projector').value;
+  document.getElementById('v_bright_left_eye').textContent = document.getElementById('s_bright_left_eye').value;
+  document.getElementById('v_bright_right_eye').textContent = document.getElementById('s_bright_right_eye').value;
+}
+
 // -------------------------------------------------------------- eye color
 let eyesEnabled = false;
 fetch(API + '/eye_colors').then((r) => r.json()).then((d) => {
@@ -326,6 +367,14 @@ async function poll() {
       document.getElementById('s_gov_tilt_hi').value = gov.tilt_hi_deg ?? 25;
       document.getElementById('s_gov_floor').value = gov.floor ?? 0.35;
       updateWalkLabels();
+    }
+
+    if (!brightnessLiveEdit) {
+      const br = stats.led_brightness || {};
+      document.getElementById('s_bright_projector').value = br.projector ?? 1.0;
+      document.getElementById('s_bright_left_eye').value = br.left_eye ?? 1.0;
+      document.getElementById('s_bright_right_eye').value = br.right_eye ?? 1.0;
+      updateBrightnessLabels();
     }
 
     const trim = stats.imu_trim || {};

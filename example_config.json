@@ -72,6 +72,13 @@
         "left_eye": 1
     },
 
+    "led_brightness": {
+        "_comment": "Per-segment brightness (0.0-1.0), applied once at startup. Only used when neopixels=true; out-of-range values are clamped. Independent from ODUCK_LED_BRIGHTNESS (the overall strip brightness env var) — this scales each segment on top of that.",
+        "projector": 1.0,
+        "right_eye": 1.0,
+        "left_eye": 1.0
+    },
+
     "_generic_usb_controller_comment": "Optional: override axis/button indices for generic_usb or 8bitdo controller types. Run controller_info.py to identify indices.",
     "generic_usb_controller": {
         "joystick_index": 0,

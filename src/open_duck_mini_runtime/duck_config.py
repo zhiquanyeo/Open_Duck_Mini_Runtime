@@ -143,6 +143,18 @@ class DuckConfig:
             "left_eye": led_counts.get("left_eye", 1),
         }
 
+        # Per-segment brightness (0.0-1.0), applied once at startup via
+        # Eyes.set_left_eye_brightness()/set_right_eye_brightness() and
+        # Projector.set_brightness() in RLWalk.__init__. Same keys as
+        # led_counts and LedController's own DEFAULT_SEGMENT_BRIGHTNESS, which
+        # clamps out-of-range values, so no validation needed here.
+        led_brightness = self.json_config.get("led_brightness", {})
+        self.led_brightness = {
+            "projector": led_brightness.get("projector", 1.0),
+            "right_eye": led_brightness.get("right_eye", 1.0),
+            "left_eye": led_brightness.get("left_eye", 1.0),
+        }
+
         # default joints offsets are 0.0
         self.joints_offset = self.json_config.get(
             "joints_offsets",

@@ -32,6 +32,7 @@ from open_duck_mini_runtime.rl_walk.battery import ChargeEstimator, estimate_per
 from open_duck_mini_runtime.rl_walk.walk_defaults import (
     WALK_TUNING_DEFAULTS,
     IMU_TRIM_DEFAULTS,
+    LED_BRIGHTNESS_DEFAULTS,
 )
 from open_duck_mini_runtime.duck_config import DuckConfig, save_config_fields
 from open_duck_mini_runtime.log import setup_logging, TRACE
@@ -234,12 +235,20 @@ class RLWalk:
             self.duck_config.phase_frequency_factor_offset
         )
 
+        # Live per-segment LED brightness — starts from config, but is the
+        # authoritative "current value" from here on (live-tuned via the web
+        # control UI's /api/setting "led_brightness" group; see
+        # _apply_led_brightness_settings()/_save_led_brightness_settings()).
+        self._led_brightness = dict(self.duck_config.led_brightness)
+
         # Optional expression features
         if self.duck_config.eyes:
             self.eyes = Eyes(
                 neopixels=self.duck_config.neopixels,
                 led_counts=self.duck_config.led_counts,
             )
+            self.eyes.set_left_eye_brightness(self._led_brightness["left_eye"])
+            self.eyes.set_right_eye_brightness(self._led_brightness["right_eye"])
             if self.paused:
                 self.eyes.set_standby(True)
                 self.eyes.set_solid(False)
@@ -250,6 +259,7 @@ class RLWalk:
                 self.eyes.set_color(self._ec(self.duck_config.eye_color_start))
         if self.duck_config.projector:
             self.projector = Projector(led_counts=self.duck_config.led_counts)
+            self.projector.set_brightness(self._led_brightness["projector"])
         if self.duck_config.speaker:
             self.sounds = Sounds(volume=1.0, sound_directory=ASSETS_ROOT_PATH)
         if self.duck_config.antennas:
@@ -300,6 +310,7 @@ class RLWalk:
                 "pitch": round(float(self.imu.pitch_trim), 5),
                 "roll": round(float(self.imu.roll_trim), 5),
             },
+            "led_brightness": {k: round(v, 4) for k, v in self._led_brightness.items()},
         }
 
     def get_telemetry(self) -> dict:
@@ -375,6 +386,13 @@ class RLWalk:
             self._reset_walk_settings()
         if "walk" in saves:
             self._save_walk_settings()
+
+        if settings.get("led_brightness"):
+            self._apply_led_brightness_settings(settings["led_brightness"])
+        if "led_brightness" in resets:
+            self._reset_led_brightness_settings()
+        if "led_brightness" in saves:
+            self._save_led_brightness_settings()
 
         pitch_delta, roll_delta, save_trim = self.control_bus.consume_trim()
         if pitch_delta or roll_delta:
@@ -463,6 +481,37 @@ class RLWalk:
         self.governor.floor = float(g["floor"])
         self.governor.smooth = float(g["smooth"])
         logger.info("Reset walk tuning to defaults %s", d)
+
+    def _apply_led_brightness_settings(self, d):
+        """Apply live per-segment brightness edits. No-ops for a segment whose
+        feature isn't enabled (self.eyes/self.projector don't exist then) —
+        the value is still tracked in _led_brightness so Save persists it."""
+        for key, v in d.items():
+            if key not in self._led_brightness:
+                logger.warning("Ignoring unknown led_brightness key %r", key)
+                continue
+            try:
+                value = float(np.clip(float(v), 0.0, 1.0))
+            except (ValueError, TypeError):
+                logger.warning("Ignoring bad led_brightness setting %s=%r", key, v)
+                continue
+            self._led_brightness[key] = value
+            if key == "projector" and self.duck_config.projector:
+                self.projector.set_brightness(value)
+            elif key == "left_eye" and self.duck_config.eyes:
+                self.eyes.set_left_eye_brightness(value)
+            elif key == "right_eye" and self.duck_config.eyes:
+                self.eyes.set_right_eye_brightness(value)
+
+    def _save_led_brightness_settings(self):
+        fields = {"led_brightness": {k: round(v, 4) for k, v in self._led_brightness.items()}}
+        backup = save_config_fields(fields, config_json_path=self.duck_config_path)
+        logger.info("Saved led_brightness %s (backup %s)", fields, backup)
+
+    def _reset_led_brightness_settings(self):
+        """Live-reset LED brightness to full (NOT persisted until the next Save)."""
+        self._apply_led_brightness_settings(LED_BRIGHTNESS_DEFAULTS)
+        logger.info("Reset led_brightness to defaults %s", LED_BRIGHTNESS_DEFAULTS)
 
     def _save_imu_trim(self):
         trim = {"pitch": float(self.imu.pitch_trim), "roll": float(self.imu.roll_trim)}

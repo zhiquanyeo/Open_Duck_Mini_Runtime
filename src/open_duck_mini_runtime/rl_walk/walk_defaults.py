@@ -28,3 +28,7 @@ WALK_TUNING_DEFAULTS = {
 # "Reset" target for the IMU mounting trim: neutral (no trim). Reset means back to
 # the 0 baseline you'd re-measure from if a manual tweak went wrong.
 IMU_TRIM_DEFAULTS = {"pitch": 0.0, "roll": 0.0}
+
+# "Reset" target for per-segment LED brightness: full brightness, same as
+# duck_config.py's own led_brightness defaults.
+LED_BRIGHTNESS_DEFAULTS = {"projector": 1.0, "right_eye": 1.0, "left_eye": 1.0}
