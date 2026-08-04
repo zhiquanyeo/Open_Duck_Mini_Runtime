@@ -48,6 +48,45 @@
     background: var(--accent-dim); border: 2px solid var(--accent); border-radius: 50%;
     pointer-events: none;
   }
+  /* attitude indicator */
+  .att-cell { display: flex; align-items: center; gap: 0.9rem; }
+  .att {
+    position: relative; width: 80px; height: 80px; min-width: 80px;
+    border-radius: 50%; overflow: hidden; border: 2px solid var(--border);
+    box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.7);
+  }
+  .att-disc {
+    position: absolute; left: -50%; top: -50%; width: 200%; height: 200%;
+    transform-origin: 50% 50%; transition: transform 0.16s linear;
+  }
+  .att-sky { position: absolute; inset: 0 0 50% 0; background: linear-gradient(#241d13, #171208); }
+  .att-gnd {
+    position: absolute; inset: 50% 0 0 0;
+    background: linear-gradient(var(--accent-dim), var(--accent));
+    border-top: 1.5px solid var(--accent);
+  }
+  .att-lad {
+    position: absolute; left: 50%; top: 50%; width: 26px; height: 2px; margin-left: -13px;
+    background: rgba(240, 230, 210, 0.5);
+  }
+  .att-fix { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3; }
+  .att-fix svg { width: 46px; height: 17px; color: var(--text); filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9)); }
+  .att-roll {
+    position: absolute; top: 2px; left: 50%; margin-left: -4px; z-index: 3;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 6px solid var(--text);
+  }
+  .att.fallen {
+    border-color: var(--danger);
+    box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.7), 0 0 14px var(--danger);
+    animation: att-alarm 0.7s steps(2) infinite;
+  }
+  .att.fallen .att-gnd { background: linear-gradient(#7a1f14, var(--danger)); border-top-color: #ffb3aa; }
+  .att.stale { filter: grayscale(0.6) opacity(0.5); }
+  @keyframes att-alarm { 50% { border-color: #7a1f14; } }
+  .att-pr { font-size: 0.85rem; color: var(--muted); display: flex; flex-direction: column; gap: 0.25rem; }
+  .att-pr b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
   .buttons-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin-top: 0.5rem; }
   .buttons-grid button { padding: 0.7rem 0.3rem; }
   .trigger-row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.5rem; }
@@ -71,6 +110,22 @@
   <span class="pill" id="pausedPill">—</span>
   <span class="pill" id="padPill">—</span>
   <span id="conn">connecting…</span>
+</div>
+
+<div class="panel att-cell">
+  <div class="att" id="att">
+    <div class="att-disc" id="attDisc">
+      <div class="att-sky"></div><div class="att-gnd"></div>
+      <div class="att-lad" style="margin-top:-16px"></div>
+      <div class="att-lad" style="margin-top:14px"></div>
+    </div>
+    <div class="att-roll"></div>
+    <div class="att-fix"><svg viewBox="0 0 44 16"><path d="M2 8 L15 8 M29 8 L42 8 M22 8 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg></div>
+  </div>
+  <div class="att-pr">
+    <div>pitch <b id="attPitch">—</b></div>
+    <div>roll <b id="attRoll">—</b></div>
+  </div>
 </div>
 
 <div class="panel">
@@ -391,6 +446,25 @@ async function poll() {
     padPill.textContent = stats.gamepad_connected ? 'pad: connected' : 'pad: none';
     padPill.className = 'pill ' + (stats.gamepad_connected ? 'good' : '');
 
+    // attitude indicator
+    const att = document.getElementById('att');
+    const attDisc = document.getElementById('attDisc');
+    att.classList.toggle('fallen', !!stats.fallen);
+    const attImu = telemetry.imu || {};
+    if (attImu.pitch != null) {
+      const pitch = Math.max(-45, Math.min(45, attImu.pitch));
+      const roll = Math.max(-70, Math.min(70, attImu.roll));
+      attDisc.style.transform = `rotate(${-roll}deg) translateY(${pitch * 0.7}px)`;
+      document.getElementById('attPitch').textContent = (attImu.pitch >= 0 ? '+' : '') + attImu.pitch.toFixed(0) + '°';
+      document.getElementById('attRoll').textContent = (attImu.roll >= 0 ? '+' : '') + attImu.roll.toFixed(0) + '°';
+      att.classList.remove('stale');
+    } else {
+      attDisc.style.transform = 'rotate(0) translateY(0)';
+      document.getElementById('attPitch').textContent = '—';
+      document.getElementById('attRoll').textContent = '—';
+      att.classList.add('stale');
+    }
+
     if (!liveEdit) {
       const wt = stats.walk_tuning || {};
       const gov = stats.stability_governor || {};
@@ -440,6 +514,7 @@ async function poll() {
     stale = true;
     document.getElementById('conn').textContent = 'reconnecting…';
     document.getElementById('conn').classList.add('bad');
+    document.getElementById('att').classList.add('stale');
   }
 }
 

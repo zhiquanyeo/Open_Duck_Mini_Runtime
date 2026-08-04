@@ -157,6 +157,9 @@ class RLWalk:
 
         self.paused = self.duck_config.start_paused
         self.motors_enabled = True
+        # Set on fall detection, cleared on the next START (motors re-enable) —
+        # exposed via get_stats() for the web UI's attitude-indicator alarm.
+        self._fallen = False
 
         # Latest sensor snapshot, refreshed each control tick in get_obs() and
         # exposed read-only via get_telemetry() (e.g. to the stats server) —
@@ -297,6 +300,7 @@ class RLWalk:
             "mode": "head_puppet" if self.head_only else "walk",
             "paused": self.paused,
             "motors_enabled": self.motors_enabled,
+            "fallen": self._fallen,
             "gamepad_connected": (
                 self.controller.connected if self.commands else False
             ),
@@ -346,6 +350,10 @@ class RLWalk:
                     "gyro": np.round(imu_data["gyro"], 4).tolist(),
                     "accel": np.round(imu_data["accelero"], 4).tolist(),
                     "gravity": np.round(imu_data["gravity"], 4).tolist(),
+                    # Cosmetic pitch/roll (deg) for the web UI's attitude
+                    # indicator — same accel_pitch_roll() the governor uses
+                    # for its own tilt severity; never used for control here.
+                    **(accel_pitch_roll(imu_data["accelero"]) or {}),
                 }
                 if imu_data is not None
                 else None
@@ -913,6 +921,7 @@ class RLWalk:
                             logger.info("START – turning motors ON and reinitialising")
                             self.start()
                             self.motors_enabled = True
+                            self._fallen = False
                             self.paused = True  # start paused; press A to begin walking
                             start_t = time.time()  # reset action-filter warmup timer
                             if self.duck_config.eyes:
@@ -935,6 +944,7 @@ class RLWalk:
                     )
                     self.hwi.turn_off()
                     self.motors_enabled = False
+                    self._fallen = True
                     self.paused = True
                     if self.duck_config.eyes:
                         self.eyes.set_standby(False)

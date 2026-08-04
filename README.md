@@ -268,7 +268,7 @@ also serves live telemetry and eye-color control once enabled:
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/telemetry` | GET | Joint positions/targets, IMU (gyro/accel/gravity), foot contacts, paused/motors_enabled |
+| `/telemetry` | GET | Joint positions/targets, IMU (gyro/accel/gravity, plus cosmetic pitch/roll in degrees), foot contacts, paused/motors_enabled |
 | `/eye_colors` | GET | Currently configured `eye_colors` (start/paused/off) |
 | `/eye_colors` | POST | `{"color": [r,g,b]}` to preview a color live, or `{"clear": true}` to stop previewing |
 
@@ -295,8 +295,10 @@ With `web_stats.enabled` set, the same server also serves a touch-control page
 at `http://<duck-ip>:<port>/control` — joystick + A/B/X/Y/LB/RB/dpad, pause/
 resume, live IMU-trim nudging, live walk-tuning (action_scale, gait offset,
 stability governor), live per-segment LED brightness (projector/left eye/
-right eye), speaker volume, eye color, and a battery gauge. No install
-needed — just open the URL on a phone or any browser on the same network.
+right eye), speaker volume, eye color, an attitude indicator (artificial
+horizon showing live pitch/roll, red alarm ring when `fallen`), and a battery
+gauge. No install needed — just open the URL on a phone or any browser on the
+same network.
 
 It's backed by `ControlBus` (`rl_walk/control_bus.py`), a third, independent
 way to drive `RLWalk` alongside `XBoxController`/`RemoteController` — the web
